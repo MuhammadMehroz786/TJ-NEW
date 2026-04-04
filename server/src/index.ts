@@ -11,6 +11,7 @@ import campaignRoutes from "./routes/campaigns";
 import promoCodeRoutes from "./routes/promoCodes";
 import affiliateLinkRoutes from "./routes/affiliateLinks";
 import manualSaleRoutes from "./routes/manualSales";
+import marketplaceProductRoutes from "./routes/marketplace";
 
 dotenv.config();
 
@@ -31,6 +32,7 @@ app.use("/api/campaigns", campaignRoutes);
 app.use("/api/promo-codes", promoCodeRoutes);
 app.use("/api/affiliate-links", affiliateLinkRoutes);
 app.use("/api/manual-sales", manualSaleRoutes);
+app.use("/api/marketplace", marketplaceProductRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });

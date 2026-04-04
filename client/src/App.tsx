@@ -16,6 +16,7 @@ import { CreatorProfile } from "@/pages/CreatorProfile";
 import { PromoCodes } from "@/pages/PromoCodes";
 import { AffiliateLinks } from "@/pages/AffiliateLinks";
 import { ManualSales } from "@/pages/ManualSales";
+import { ProductMarketplace } from "@/pages/ProductMarketplace";
 import { useAuth } from "@/hooks/useAuth";
 
 function DashboardSwitch() {
@@ -50,6 +51,7 @@ export default function App() {
 
           {/* Creator-only */}
           <Route path="/campaigns" element={<ProtectedRoute role="CREATOR"><Campaigns /></ProtectedRoute>} />
+          <Route path="/browse-products" element={<ProtectedRoute role="CREATOR"><ProductMarketplace /></ProtectedRoute>} />
           <Route path="/affiliate-links" element={<ProtectedRoute role="CREATOR"><AffiliateLinks /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute role="CREATOR"><CreatorProfile /></ProtectedRoute>} />
         </Route>
