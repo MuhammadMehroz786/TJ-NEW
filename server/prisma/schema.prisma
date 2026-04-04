@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Platform {
+  SALLA
+  SHOPIFY
+}
+
+enum ConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  PENDING
+}
+
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum UserRole {
+  MERCHANT
+  CREATOR
+}
+
+enum CampaignStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  IN_PROGRESS
+  SUBMITTED
+  REVISION_REQUESTED
+  APPROVED
+  COMPLETED
+}
+
+enum PaymentStatus {
+  HELD
+  RELEASED
+  REFUNDED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      UserRole @default(MERCHANT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  marketplaceConnections MarketplaceConnection[]
+  products               Product[]
+  creatorProfile         CreatorProfile?
+  merchantCampaigns      Campaign[]              @relation("MerchantCampaigns")
+  creatorCampaigns       Campaign[]              @relation("CreatorCampaigns")
+}
+
+model CreatorProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  displayName     String
+  bio             String?  @db.Text
+  profilePhoto    String?
+  niche           String
+  rate            Decimal  @db.Decimal(10, 2)
+  socialPlatforms Json     @default("[]")
+  portfolioLinks  Json     @default("[]")
+  isAvailable     Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Campaign {
+  id           String         @id @default(uuid())
+  merchantId   String
+  creatorId    String
+  productId    String
+  status       CampaignStatus @default(PENDING)
+  brief        String         @db.Text
+  amount       Decimal        @db.Decimal(10, 2)
+  socialLinks  Json           @default("[]")
+  revisionNote String?        @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  merchant User    @relation("MerchantCampaigns", fields: [merchantId], references: [id], onDelete: Cascade)
+  creator  User    @relation("CreatorCampaigns", fields: [creatorId], references: [id], onDelete: Cascade)
+  product  Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  payment  Payment?
+}
+
+model Payment {
+  id         String        @id @default(uuid())
+  campaignId String        @unique
+  amount     Decimal       @db.Decimal(10, 2)
+  status     PaymentStatus @default(HELD)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+model MarketplaceConnection {
+  id             String           @id @default(uuid())
+  userId         String
+  platform       Platform
+  storeName      String
+  storeUrl       String
+  accessToken    String
+  clientId       String?
+  clientSecret   String?
+  tokenExpiresAt DateTime?
+  status         ConnectionStatus @default(CONNECTED)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([userId, storeUrl])
+}
+
+model Product {
+  id                      String        @id @default(uuid())
+  userId                  String
+  marketplaceConnectionId String?
+  title                   String        @db.VarChar(255)
+  description             String?       @db.Text
+  price                   Decimal       @db.Decimal(10, 2)
+  compareAtPrice          Decimal?      @db.Decimal(10, 2)
+  sku                     String?
+  barcode                 String?
+  currency                String        @default("SAR")
+  quantity                Int           @default(0)
+  images                  Json          @default("[]")
+  category                String?
+  productType             String?
+  vendor                  String?
+  tags                    Json          @default("[]")
+  weight                  Decimal?      @db.Decimal(10, 2)
+  weightUnit              String?       @default("kg")
+  status                  ProductStatus @default(DRAFT)
+  platformProductId       String?
+  platformData            Json?
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketplaceConnection MarketplaceConnection? @relation(fields: [marketplaceConnectionId], references: [id], onDelete: SetNull)
+  campaigns             Campaign[]
+
+  @@unique([sku, userId])
+}
