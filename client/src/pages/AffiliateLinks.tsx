@@ -82,6 +82,8 @@ export function AffiliateLinks() {
     toast.success("Link copied to clipboard");
   };
 
+  const getTrackUrl = (slug: string) => `${window.location.origin}/api/affiliate-links/track/${slug}`;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -160,7 +162,7 @@ export function AffiliateLinks() {
                     </TableCell>
                     <TableCell>
                       <a href={l.targetUrl} target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline text-sm flex items-center gap-1">
-                        {(() => { try { return new URL(l.targetUrl).hostname; } catch { return l.targetUrl; } })()} <ExternalLink className="h-3 w-3" />
+                        {new URL(l.targetUrl).hostname} <ExternalLink className="h-3 w-3" />
                       </a>
                     </TableCell>
                     <TableCell className="text-center">
