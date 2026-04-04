@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Megaphone, UserCircle, Settings, LogOut, ChevronDown } from "lucide-react";
+import { LayoutDashboard, Megaphone, UserCircle, Settings, LogOut, ChevronDown, Link2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/campaigns", icon: Megaphone, label: "Campaigns" },
+  { to: "/affiliate-links", icon: Link2, label: "Affiliate Links" },
   { to: "/profile", icon: UserCircle, label: "My Profile" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];

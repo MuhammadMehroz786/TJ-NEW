@@ -60,6 +60,10 @@ model User {
   creatorProfile         CreatorProfile?
   merchantCampaigns      Campaign[]              @relation("MerchantCampaigns")
   creatorCampaigns       Campaign[]              @relation("CreatorCampaigns")
+  promoCodes             PromoCode[]
+  affiliateLinks         AffiliateLink[]
+  merchantSales          ManualSale[]            @relation("MerchantSales")
+  creatorSales           ManualSale[]            @relation("CreatorSales")
 }
 
 model CreatorProfile {
@@ -107,6 +111,64 @@ model Payment {
   updatedAt  DateTime      @updatedAt
 
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+model PromoCode {
+  id          String   @id @default(uuid())
+  merchantId  String
+  code        String
+  description String?
+  discount    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  merchant User @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, code])
+}
+
+model AffiliateLink {
+  id        String   @id @default(uuid())
+  creatorId String
+  productId String
+  slug      String   @unique
+  targetUrl String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  creator User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  product Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  clicks  Click[]
+
+  @@unique([creatorId, productId])
+}
+
+model Click {
+  id              String   @id @default(uuid())
+  affiliateLinkId String
+  ip              String?
+  userAgent       String?
+  referer         String?
+  createdAt       DateTime @default(now())
+
+  affiliateLink AffiliateLink @relation(fields: [affiliateLinkId], references: [id], onDelete: Cascade)
+}
+
+model ManualSale {
+  id         String   @id @default(uuid())
+  merchantId String
+  creatorId  String
+  productId  String?
+  orderId    String?
+  amount     Decimal  @db.Decimal(10, 2)
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  merchant User    @relation("MerchantSales", fields: [merchantId], references: [id], onDelete: Cascade)
+  creator  User    @relation("CreatorSales", fields: [creatorId], references: [id], onDelete: Cascade)
+  product  Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 }
 
 model MarketplaceConnection {
@@ -157,6 +219,8 @@ model Product {
   user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   marketplaceConnection MarketplaceConnection? @relation(fields: [marketplaceConnectionId], references: [id], onDelete: SetNull)
   campaigns             Campaign[]
+  affiliateLinks        AffiliateLink[]
+  manualSales           ManualSale[]
 
   @@unique([sku, userId])
 }

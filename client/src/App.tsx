@@ -13,6 +13,9 @@ import { Advertising } from "@/pages/Advertising";
 import { CreatorDashboard } from "@/pages/CreatorDashboard";
 import { Campaigns } from "@/pages/Campaigns";
 import { CreatorProfile } from "@/pages/CreatorProfile";
+import { PromoCodes } from "@/pages/PromoCodes";
+import { AffiliateLinks } from "@/pages/AffiliateLinks";
+import { ManualSales } from "@/pages/ManualSales";
 import { useAuth } from "@/hooks/useAuth";
 
 function DashboardSwitch() {
@@ -41,10 +44,13 @@ export default function App() {
           <Route path="/products" element={<ProtectedRoute role="MERCHANT"><Products /></ProtectedRoute>} />
           <Route path="/marketplaces" element={<ProtectedRoute role="MERCHANT"><Marketplaces /></ProtectedRoute>} />
           <Route path="/advertising" element={<ProtectedRoute role="MERCHANT"><Advertising /></ProtectedRoute>} />
+          <Route path="/promo-codes" element={<ProtectedRoute role="MERCHANT"><PromoCodes /></ProtectedRoute>} />
+          <Route path="/sales" element={<ProtectedRoute role="MERCHANT"><ManualSales /></ProtectedRoute>} />
           <Route path="/shopify-guide" element={<ProtectedRoute role="MERCHANT"><ShopifyGuide /></ProtectedRoute>} />
 
           {/* Creator-only */}
           <Route path="/campaigns" element={<ProtectedRoute role="CREATOR"><Campaigns /></ProtectedRoute>} />
+          <Route path="/affiliate-links" element={<ProtectedRoute role="CREATOR"><AffiliateLinks /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute role="CREATOR"><CreatorProfile /></ProtectedRoute>} />
         </Route>
 
