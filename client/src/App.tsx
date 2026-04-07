@@ -17,6 +17,7 @@ import { PromoCodes } from "@/pages/PromoCodes";
 import { AffiliateLinks } from "@/pages/AffiliateLinks";
 import { ManualSales } from "@/pages/ManualSales";
 import { ProductMarketplace } from "@/pages/ProductMarketplace";
+import { AIStudio } from "@/pages/AIStudio";
 import { useAuth } from "@/hooks/useAuth";
 
 function DashboardSwitch() {
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="/advertising" element={<ProtectedRoute role="MERCHANT"><Advertising /></ProtectedRoute>} />
           <Route path="/promo-codes" element={<ProtectedRoute role="MERCHANT"><PromoCodes /></ProtectedRoute>} />
           <Route path="/sales" element={<ProtectedRoute role="MERCHANT"><ManualSales /></ProtectedRoute>} />
+          <Route path="/ai-studio" element={<ProtectedRoute role="MERCHANT"><AIStudio /></ProtectedRoute>} />
           <Route path="/shopify-guide" element={<ProtectedRoute role="MERCHANT"><ShopifyGuide /></ProtectedRoute>} />
 
           {/* Creator-only */}

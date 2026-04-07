@@ -183,6 +183,12 @@ function ImageUploadSection({
   const [dragging, setDragging] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryFolder, setLibraryFolder] = useState("all");
+  const [libraryFolders, setLibraryFolders] = useState<Array<{ id: string; name: string }>>([]);
+  const [libraryImages, setLibraryImages] = useState<Array<{ id: string; imageUrl: string; createdAt: string }>>([]);
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback(
@@ -242,6 +248,64 @@ function ImageUploadSection({
     const [moved] = updated.splice(fromIdx, 1);
     updated.splice(toIdx, 0, moved);
     onChange(updated);
+  };
+
+  const fetchLibraryFolders = useCallback(() => {
+    api.get("/ai-studio/folders")
+      .then((res) => setLibraryFolders(res.data || []))
+      .catch(() => {});
+  }, []);
+
+  const fetchLibraryImages = useCallback((folderId: string) => {
+    setLibraryLoading(true);
+    api.get("/ai-studio/library", { params: { folderId } })
+      .then((res) => setLibraryImages(res.data.data || []))
+      .catch(() => toast.error("Failed to load AI Studio images"))
+      .finally(() => setLibraryLoading(false));
+  }, []);
+
+  const openLibrary = () => {
+    setLibraryOpen(true);
+    setSelectedLibraryIds(new Set());
+    fetchLibraryFolders();
+    fetchLibraryImages("all");
+  };
+
+  const addUniqueImages = (urls: string[]) => {
+    const merged = [...images];
+    urls.forEach((url) => {
+      if (!merged.includes(url)) merged.push(url);
+    });
+    onChange(merged);
+  };
+
+  const addSelectedLibraryImages = () => {
+    const selectedUrls = libraryImages
+      .filter((item) => selectedLibraryIds.has(item.id))
+      .map((item) => item.imageUrl);
+    if (selectedUrls.length === 0) {
+      toast.error("Please select image(s)");
+      return;
+    }
+    addUniqueImages(selectedUrls);
+    setLibraryOpen(false);
+    setSelectedLibraryIds(new Set());
+    toast.success(`${selectedUrls.length} image(s) added from AI Studio`);
+  };
+
+  const addCurrentFolderImages = () => {
+    if (libraryFolder === "all") {
+      toast.error("Please choose a specific folder first");
+      return;
+    }
+    if (libraryImages.length === 0) {
+      toast.error("No images found in this folder");
+      return;
+    }
+    addUniqueImages(libraryImages.map((item) => item.imageUrl));
+    setLibraryOpen(false);
+    setSelectedLibraryIds(new Set());
+    toast.success(`${libraryImages.length} image(s) added from folder`);
   };
 
   return (
@@ -312,6 +376,16 @@ function ImageUploadSection({
           <ImagePlus className="h-4 w-4 mr-1" />
           Add
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={openLibrary}
+          className="shrink-0"
+        >
+          <ImagePlus className="h-4 w-4 mr-1" />
+          From AI Studio
+        </Button>
       </div>
 
       {/* Image Previews */}
@@ -371,6 +445,87 @@ function ImageUploadSection({
           ))}
         </div>
       )}
+
+      <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Select from AI Studio</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-2 mb-3">
+            <Select
+              value={libraryFolder}
+              onValueChange={(v) => {
+                setLibraryFolder(v);
+                setSelectedLibraryIds(new Set());
+                fetchLibraryImages(v);
+              }}
+            >
+              <SelectTrigger className="w-52">
+                <SelectValue placeholder="Folder" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Media</SelectItem>
+                {libraryFolders.map((folder) => (
+                  <SelectItem key={folder.id} value={folder.id}>
+                    {folder.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addCurrentFolderImages}
+              disabled={libraryFolder === "all" || libraryImages.length === 0}
+            >
+              Add Folder
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="bg-teal-600 hover:bg-teal-700 text-white"
+              onClick={addSelectedLibraryImages}
+              disabled={selectedLibraryIds.size === 0}
+            >
+              Add Selected ({selectedLibraryIds.size})
+            </Button>
+          </div>
+          {libraryLoading ? (
+            <div className="p-8 text-center text-slate-500">Loading images...</div>
+          ) : libraryImages.length === 0 ? (
+            <div className="p-8 text-center text-slate-500">No images found in this folder</div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              {libraryImages.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    const next = new Set(selectedLibraryIds);
+                    if (next.has(item.id)) next.delete(item.id);
+                    else next.add(item.id);
+                    setSelectedLibraryIds(next);
+                  }}
+                  className={`group text-left border rounded-lg overflow-hidden ${
+                    selectedLibraryIds.has(item.id)
+                      ? "border-teal-400 ring-2 ring-teal-200"
+                      : "border-slate-200 hover:border-teal-300"
+                  }`}
+                >
+                  <img src={item.imageUrl} alt="AI Studio" className="h-36 w-full object-cover bg-slate-50" />
+                  <div className="p-2">
+                    <p className="text-[11px] text-slate-500">{new Date(item.createdAt).toLocaleString()}</p>
+                    <p className="text-xs text-teal-700 mt-1">
+                      {selectedLibraryIds.has(item.id) ? "Selected" : "Click to select"}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

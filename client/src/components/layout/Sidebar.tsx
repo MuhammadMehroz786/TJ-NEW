@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Package, Store, Megaphone, Settings, LogOut, ChevronDown, Tag, CreditCard } from "lucide-react";
+import { LayoutDashboard, Package, Store, Megaphone, Settings, LogOut, ChevronDown, Tag, CreditCard, Sparkles } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ const navItems = [
   { to: "/advertising", icon: Megaphone, label: "Advertising" },
   { to: "/promo-codes", icon: Tag, label: "Promo Codes" },
   { to: "/sales", icon: CreditCard, label: "Sales Attribution" },
+  { to: "/ai-studio", icon: Sparkles, label: "AI Studio" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
