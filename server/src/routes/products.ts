@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { ShopifyService, ShopifyAuthError, ShopifyApiError } from "../services/shopify";
 import { tijarflowProductToShopify } from "../services/shopifyMapper";
+import { GoogleGenAI } from "@google/genai";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -251,6 +252,89 @@ router.post("/push", async (req: AuthRequest, res: Response): Promise<void> => {
     } else {
       res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
     }
+  }
+});
+
+// POST /api/products/enhance-image — AI image enhancement using Gemini 2.5 Flash Image
+router.post("/enhance-image", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { image, title, description, background } = req.body;
+
+    if (!image) {
+      res.status(400).json({ error: "Please upload an image first to enhance it", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      res.status(500).json({ error: "GEMINI_API_KEY is not set", code: "CONFIG_ERROR" });
+      return;
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    // Background scene descriptions
+    const backgroundScenes: Record<string, string> = {
+      studio: "a clean pure white studio background with professional soft-box lighting and a subtle shadow underneath the product",
+      kitchen: "a modern luxury kitchen countertop with marble surface, warm ambient lighting, and slightly blurred kitchen appliances in the background",
+      mall: "a premium shopping mall display shelf with elegant retail store lighting, soft spotlights, and glass shelving",
+      outdoor: "a beautiful outdoor setting with soft golden-hour sunlight and a lush green bokeh background",
+      living_room: "a cozy modern living room with stylish furniture, warm natural light coming from large windows",
+      office: "a sleek modern office desk with clean workspace, minimalist decor, and professional lighting",
+      nature: "a natural organic setting with a wooden surface, fresh green leaves and plants in soft-focus background",
+      gradient: "a smooth gradient background with soft pastel tones, clean and modern with no distractions",
+    };
+
+    const sceneName = background && backgroundScenes[background] ? background : "studio";
+    const sceneDescription = backgroundScenes[sceneName];
+
+    // Image-to-image editing prompt — keeps the product identical, only improves quality and changes background
+    const productContext = title
+      ? `This is a product photo of: ${title}${description ? `. ${description}` : ""}.`
+      : "This is a product photo.";
+
+    const finalPrompt = `${productContext} Edit this product image with the following instructions:
+
+1. KEEP THE PRODUCT EXACTLY AS IT IS — do NOT change, modify, or regenerate the product itself. The product must remain pixel-perfect identical in shape, color, texture, and every detail.
+2. REMOVE the current background completely.
+3. REPLACE the background with: ${sceneDescription}.
+4. IMPROVE the overall image quality: enhance sharpness, fix lighting to look professional, improve color balance, and increase clarity.
+5. Make the product look like it was photographed by a professional e-commerce photographer.
+6. Do NOT add any text, watermarks, or logos.
+7. The final result should look like a high-quality, professional product photograph.`;
+
+    // Build request contents — image FIRST so the model focuses on editing it
+    const match = image.match(/^data:([^;]+);base64,(.+)$/);
+    const mimeType = match ? match[1] : "image/jpeg";
+    const base64Data = match ? match[2] : image.split(",")[1] || image;
+
+    const contents: any[] = [
+      { inlineData: { mimeType, data: base64Data } },
+      finalPrompt,
+    ];
+
+    // Generate enhanced image using Gemini 2.5 Flash Image model
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-image",
+      contents,
+      config: {
+        responseModalities: ["image", "text"],
+      },
+    });
+
+    // Extract image from response parts
+    const parts = response.candidates?.[0]?.content?.parts;
+    if (!parts) throw new Error("No response parts returned.");
+
+    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
+    if (!imagePart?.inlineData) throw new Error("No image data in response.");
+
+    const outputMimeType = imagePart.inlineData.mimeType || "image/png";
+    const base64 = imagePart.inlineData.data;
+
+    res.json({ image: `data:${outputMimeType};base64,${base64}`, prompt: finalPrompt });
+  } catch (err: any) {
+    console.error("Enhance Image Error:", err);
+    res.status(500).json({ error: err.message || "Failed to enhance image", code: "ENHANCE_ERROR" });
   }
 });
 

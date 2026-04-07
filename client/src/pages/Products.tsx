@@ -397,6 +397,9 @@ export function Products() {
   const [saving, setSaving] = useState(false);
   const [connections, setConnections] = useState<MarketplaceConn[]>([]);
   const [pushing, setPushing] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceProgress, setEnhanceProgress] = useState("");
+  const [enhanceBackground, setEnhanceBackground] = useState("studio");
 
   // Advertise state
   const [advertiseProduct, setAdvertiseProduct] = useState<Product | null>(null);
@@ -446,6 +449,42 @@ export function Products() {
       toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to send request");
     } finally { setSendingRequest(false); }
   };
+
+  const handleEnhanceAllImages = async () => {
+    if (form.images.length === 0) {
+      toast.error("Please upload at least one image first");
+      return;
+    }
+    setEnhancing(true);
+    const newImages = [...form.images];
+    let enhanced = 0;
+    try {
+      for (let i = 0; i < newImages.length; i++) {
+        setEnhanceProgress(`Enhancing image ${i + 1} of ${newImages.length}...`);
+        const res = await api.post("/products/enhance-image", {
+          image: newImages[i],
+          title: form.title,
+          description: form.description,
+          background: enhanceBackground
+        });
+        newImages[i] = res.data.image;
+        enhanced++;
+      }
+      setForm({ ...form, images: newImages });
+      toast.success(`${enhanced} image(s) enhanced successfully!`);
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to enhance images.";
+      toast.error(message);
+      // Still save whatever we managed to enhance
+      if (enhanced > 0) {
+        setForm({ ...form, images: newImages });
+      }
+    } finally {
+      setEnhancing(false);
+      setEnhanceProgress("");
+    }
+  };
+  
   const pageSize = 20;
 
   const fetchProducts = () => {
@@ -944,6 +983,52 @@ export function Products() {
               images={form.images}
               onChange={(images) => setForm({ ...form, images })}
             />
+
+            {/* AI Enhancement Button */}
+            {form.images.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleEnhanceAllImages}
+                    disabled={enhancing}
+                    className="flex-1 border-teal-200 text-teal-700 hover:bg-teal-50 hover:border-teal-300 transition-all"
+                  >
+                    {enhancing ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 mr-2 text-teal-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        {enhanceProgress || "Enhancing..."}
+                      </>
+                    ) : (
+                      <>
+                        <ImagePlus className="h-4 w-4 mr-2" />
+                        AI Enhancement
+                      </>
+                    )}
+                  </Button>
+                  <Select value={enhanceBackground} onValueChange={setEnhanceBackground}>
+                    <SelectTrigger className="w-[150px] border-teal-200 text-teal-700">
+                      <SelectValue placeholder="Background" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="studio">Studio</SelectItem>
+                      <SelectItem value="kitchen">Kitchen</SelectItem>
+                      <SelectItem value="mall">Mall</SelectItem>
+                      <SelectItem value="outdoor">Outdoor</SelectItem>
+                      <SelectItem value="living_room">Living Room</SelectItem>
+                      <SelectItem value="office">Office</SelectItem>
+                      <SelectItem value="nature">Nature</SelectItem>
+                      <SelectItem value="gradient">Gradient</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+              </div>
+            )}
 
             <hr className="border-slate-200" />
 
