@@ -52,6 +52,8 @@ model User {
   password  String
   name      String
   role      UserRole @default(MERCHANT)
+  aiCredits Int      @default(50)
+  aiCreditsWeekKey String @default("")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

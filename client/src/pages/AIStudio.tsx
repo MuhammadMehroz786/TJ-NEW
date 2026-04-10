@@ -37,6 +37,7 @@ const backgroundOptions = [
 export function AIStudio() {
   const [images, setImages] = useState<AiStudioImage[]>([]);
   const [folders, setFolders] = useState<AiStudioFolder[]>([]);
+  const [aiCredits, setAiCredits] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceProgress, setEnhanceProgress] = useState("");
@@ -52,6 +53,14 @@ export function AIStudio() {
   const [newlyEnhanced, setNewlyEnhanced] = useState<AiStudioImage | null>(null);
   const [savingEnhanceFolder, setSavingEnhanceFolder] = useState("none");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const creditClassName = aiCredits === null
+    ? "text-teal-700"
+    : aiCredits <= 0
+      ? "text-red-600"
+      : aiCredits <= 5
+        ? "text-amber-600"
+        : "text-teal-700";
 
   const fetchFolders = useCallback(() => {
     api.get("/ai-studio/folders").then((res) => setFolders(res.data || [])).catch(() => toast.error("Failed to load folders"));
@@ -69,6 +78,9 @@ export function AIStudio() {
   useEffect(() => {
     fetchFolders();
     fetchImages();
+    api.get("/user/ai-credits")
+      .then((res) => setAiCredits(res.data.remainingCredits))
+      .catch(() => {});
   }, [fetchFolders, fetchImages]);
 
   const handleFileSelect = (files: FileList | File[] | null) => {
@@ -109,6 +121,9 @@ export function AIStudio() {
           folderId: selectedFolderId === "all" ? null : selectedFolderId,
         });
         newRecords.push(res.data);
+        if (typeof res.data?.remainingCredits === "number") {
+          setAiCredits(res.data.remainingCredits);
+        }
         enhancedCount++;
       }
       setImages((prev) => [...newRecords, ...prev]);
@@ -203,6 +218,14 @@ export function AIStudio() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">AI Studio</h1>
         <p className="text-slate-500 text-sm mt-1">{images.length} items in Media</p>
+        <p className={`text-sm mt-1 font-medium ${creditClassName}`}>
+          AI Credits: {aiCredits ?? "—"} / 50 (resets every Monday)
+        </p>
+        {aiCredits !== null && aiCredits <= 0 && (
+          <p className="text-xs text-red-600 mt-1">
+            You have exhausted your weekly AI credits. Credits will reset on Monday.
+          </p>
+        )}
       </div>
 
       <Card className="border-slate-200/60">

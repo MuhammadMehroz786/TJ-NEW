@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "User"
+ADD COLUMN "aiCredits" INTEGER NOT NULL DEFAULT 50,
+ADD COLUMN "aiCreditsWeekKey" TEXT NOT NULL DEFAULT '';

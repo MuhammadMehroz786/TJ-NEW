@@ -539,6 +539,7 @@ interface MarketplaceConn {
 
 export function Products() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [aiCredits, setAiCredits] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -564,6 +565,14 @@ export function Products() {
   const [brief, setBrief] = useState("");
   const [nicheFilter, setNicheFilter] = useState("all");
   const [sendingRequest, setSendingRequest] = useState(false);
+
+  const creditClassName = aiCredits === null
+    ? "text-teal-700"
+    : aiCredits <= 0
+      ? "text-red-600"
+      : aiCredits <= 5
+        ? "text-amber-600"
+        : "text-teal-700";
 
   const openAdvertise = (product: Product) => {
     setAdvertiseProduct(product);
@@ -623,6 +632,9 @@ export function Products() {
           background: enhanceBackground
         });
         newImages[i] = res.data.image;
+        if (typeof res.data?.remainingCredits === "number") {
+          setAiCredits(res.data.remainingCredits);
+        }
         enhanced++;
       }
       setForm({ ...form, images: newImages });
@@ -663,6 +675,9 @@ export function Products() {
     api.get("/marketplaces").then((res) => {
       setConnections(res.data.filter((c: MarketplaceConn) => c.status === "CONNECTED"));
     }).catch(() => {});
+    api.get("/user/ai-credits")
+      .then((res) => setAiCredits(res.data.remainingCredits))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -807,6 +822,14 @@ export function Products() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Products</h1>
           <p className="text-slate-500 text-sm mt-1">{total} products total</p>
+          <p className={`text-sm mt-1 font-medium ${creditClassName}`}>
+            AI Credits: {aiCredits ?? "—"} / 50 (resets every Monday)
+          </p>
+          {aiCredits !== null && aiCredits <= 0 && (
+            <p className="text-xs text-red-600 mt-1">
+              You have exhausted your weekly AI credits. Credits will reset on Monday.
+            </p>
+          )}
         </div>
         <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700 text-white">
           <Plus className="h-4 w-4 mr-2" />

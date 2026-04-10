@@ -5,6 +5,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import crypto from "crypto";
 import { authenticate, AuthRequest, requireRole } from "../middleware/auth";
+import { AICreditError, consumeWeeklyAICredit } from "../services/aiCredits";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -176,6 +177,8 @@ router.post("/enhance", async (req: AuthRequest, res: Response): Promise<void> =
       return;
     }
 
+    const creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
+
     const sceneName = background && backgroundScenes[background] ? background : "studio";
     const sceneDescription = backgroundScenes[sceneName];
     const fixedPrompt = `Edit this product image with the following instructions:
@@ -240,8 +243,16 @@ router.post("/enhance", async (req: AuthRequest, res: Response): Promise<void> =
       },
     });
 
-    res.status(201).json(record);
+    res.status(201).json({
+      ...record,
+      remainingCredits: creditUsage.remainingCredits,
+      creditsResetWeek: creditUsage.resetWeek,
+    });
   } catch (err: any) {
+    if (err instanceof AICreditError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
     console.error("AI Studio enhance error:", err);
     res.status(500).json({ error: err.message || "Failed to enhance image", code: "ENHANCE_ERROR" });
   }

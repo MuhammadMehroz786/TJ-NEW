@@ -4,6 +4,7 @@ import { authenticate, AuthRequest } from "../middleware/auth";
 import { ShopifyService, ShopifyAuthError, ShopifyApiError } from "../services/shopify";
 import { tijarflowProductToShopify } from "../services/shopifyMapper";
 import { GoogleGenAI } from "@google/genai";
+import { AICreditError, consumeWeeklyAICredit } from "../services/aiCredits";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -270,6 +271,8 @@ router.post("/enhance-image", async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
+    const creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
+
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     // Background scene descriptions
@@ -331,8 +334,17 @@ router.post("/enhance-image", async (req: AuthRequest, res: Response): Promise<v
     const outputMimeType = imagePart.inlineData.mimeType || "image/png";
     const base64 = imagePart.inlineData.data;
 
-    res.json({ image: `data:${outputMimeType};base64,${base64}`, prompt: finalPrompt });
+    res.json({
+      image: `data:${outputMimeType};base64,${base64}`,
+      prompt: finalPrompt,
+      remainingCredits: creditUsage.remainingCredits,
+      creditsResetWeek: creditUsage.resetWeek,
+    });
   } catch (err: any) {
+    if (err instanceof AICreditError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
     console.error("Enhance Image Error:", err);
     res.status(500).json({ error: err.message || "Failed to enhance image", code: "ENHANCE_ERROR" });
   }
