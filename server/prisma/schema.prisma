@@ -68,6 +68,7 @@ model User {
   creatorSales           ManualSale[]            @relation("CreatorSales")
   aiStudioImages         AiStudioImage[]
   aiStudioFolders        AiStudioFolder[]
+  whatsappSessions       WhatsAppSession[]
 }
 
 model CreatorProfile {
@@ -258,4 +259,23 @@ model AiStudioFolder {
 
   @@unique([userId, name])
   @@index([userId, createdAt])
+}
+
+model WhatsAppSession {
+  id            String   @id @default(uuid())
+  phoneNumber   String   @unique
+  userId        String?
+  creditsUsed   Int      @default(0)
+  creditsLimit  Int      @default(5)
+  isVerified    Boolean  @default(false)
+  state         String   @default("idle")
+  emailAttempts Int      @default(0)
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([state, lastMessageAt])
+  @@index([userId])
 }

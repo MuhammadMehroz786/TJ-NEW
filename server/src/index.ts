@@ -14,6 +14,7 @@ import affiliateLinkRoutes from "./routes/affiliateLinks";
 import manualSaleRoutes from "./routes/manualSales";
 import marketplaceProductRoutes from "./routes/marketplace";
 import aiStudioRoutes from "./routes/aiStudio";
+import whatsappRoutes from "./routes/whatsapp";
 
 dotenv.config();
 
@@ -37,6 +38,7 @@ app.use("/api/affiliate-links", affiliateLinkRoutes);
 app.use("/api/manual-sales", manualSaleRoutes);
 app.use("/api/marketplace", marketplaceProductRoutes);
 app.use("/api/ai-studio", aiStudioRoutes);
+app.use("/api/whatsapp", whatsappRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
