@@ -216,14 +216,14 @@ router.patch("/:id/submit", authenticate, requireRole("CREATOR"), async (req: Au
       res.status(404).json({ error: "Campaign not found", code: "NOT_FOUND" });
       return;
     }
-    if (campaign.status !== "IN_PROGRESS") {
+    if (campaign.status !== "IN_PROGRESS" && campaign.status !== "REVISION_REQUESTED") {
       res.status(400).json({ error: "Campaign is not in progress", code: "VALIDATION_ERROR" });
       return;
     }
 
     const updated = await prisma.campaign.update({
       where: { id: req.params.id },
-      data: { status: "SUBMITTED", socialLinks },
+      data: { status: "SUBMITTED", socialLinks, revisionNote: null },
       include: campaignInclude,
     });
 
@@ -266,7 +266,7 @@ router.patch("/:id/approve", authenticate, requireRole("MERCHANT"), async (req: 
   }
 });
 
-// PATCH /api/campaigns/:id/revision — Merchant requests revision (SUBMITTED → IN_PROGRESS)
+// PATCH /api/campaigns/:id/revision — Merchant requests revision (SUBMITTED → REVISION_REQUESTED)
 router.patch("/:id/revision", authenticate, requireRole("MERCHANT"), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { revisionNote } = req.body;
@@ -287,7 +287,7 @@ router.patch("/:id/revision", authenticate, requireRole("MERCHANT"), async (req:
 
     const updated = await prisma.campaign.update({
       where: { id: req.params.id },
-      data: { status: "IN_PROGRESS", revisionNote },
+      data: { status: "REVISION_REQUESTED", revisionNote },
       include: campaignInclude,
     });
 

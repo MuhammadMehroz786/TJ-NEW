@@ -67,6 +67,10 @@ interface Product {
   category: string | null;
   tags: string[];
   status: string;
+  productType: string | null;
+  vendor: string | null;
+  weight: number | null;
+  weightUnit: string | null;
   marketplaceConnection?: { id: string; platform: string; storeName: string } | null;
   createdAt: string;
   updatedAt: string;
@@ -183,12 +187,6 @@ function ImageUploadSection({
   const [dragging, setDragging] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  const [libraryLoading, setLibraryLoading] = useState(false);
-  const [libraryFolder, setLibraryFolder] = useState("all");
-  const [libraryFolders, setLibraryFolders] = useState<Array<{ id: string; name: string }>>([]);
-  const [libraryImages, setLibraryImages] = useState<Array<{ id: string; imageUrl: string; createdAt: string }>>([]);
-  const [selectedLibraryIds, setSelectedLibraryIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback(
@@ -248,64 +246,6 @@ function ImageUploadSection({
     const [moved] = updated.splice(fromIdx, 1);
     updated.splice(toIdx, 0, moved);
     onChange(updated);
-  };
-
-  const fetchLibraryFolders = useCallback(() => {
-    api.get("/ai-studio/folders")
-      .then((res) => setLibraryFolders(res.data || []))
-      .catch(() => {});
-  }, []);
-
-  const fetchLibraryImages = useCallback((folderId: string) => {
-    setLibraryLoading(true);
-    api.get("/ai-studio/library", { params: { folderId } })
-      .then((res) => setLibraryImages(res.data.data || []))
-      .catch(() => toast.error("Failed to load AI Studio images"))
-      .finally(() => setLibraryLoading(false));
-  }, []);
-
-  const openLibrary = () => {
-    setLibraryOpen(true);
-    setSelectedLibraryIds(new Set());
-    fetchLibraryFolders();
-    fetchLibraryImages("all");
-  };
-
-  const addUniqueImages = (urls: string[]) => {
-    const merged = [...images];
-    urls.forEach((url) => {
-      if (!merged.includes(url)) merged.push(url);
-    });
-    onChange(merged);
-  };
-
-  const addSelectedLibraryImages = () => {
-    const selectedUrls = libraryImages
-      .filter((item) => selectedLibraryIds.has(item.id))
-      .map((item) => item.imageUrl);
-    if (selectedUrls.length === 0) {
-      toast.error("Please select image(s)");
-      return;
-    }
-    addUniqueImages(selectedUrls);
-    setLibraryOpen(false);
-    setSelectedLibraryIds(new Set());
-    toast.success(`${selectedUrls.length} image(s) added from AI Studio`);
-  };
-
-  const addCurrentFolderImages = () => {
-    if (libraryFolder === "all") {
-      toast.error("Please choose a specific folder first");
-      return;
-    }
-    if (libraryImages.length === 0) {
-      toast.error("No images found in this folder");
-      return;
-    }
-    addUniqueImages(libraryImages.map((item) => item.imageUrl));
-    setLibraryOpen(false);
-    setSelectedLibraryIds(new Set());
-    toast.success(`${libraryImages.length} image(s) added from folder`);
   };
 
   return (
@@ -376,16 +316,6 @@ function ImageUploadSection({
           <ImagePlus className="h-4 w-4 mr-1" />
           Add
         </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={openLibrary}
-          className="shrink-0"
-        >
-          <ImagePlus className="h-4 w-4 mr-1" />
-          From AI Studio
-        </Button>
       </div>
 
       {/* Image Previews */}
@@ -445,87 +375,6 @@ function ImageUploadSection({
           ))}
         </div>
       )}
-
-      <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Select from AI Studio</DialogTitle>
-          </DialogHeader>
-          <div className="flex items-center gap-2 mb-3">
-            <Select
-              value={libraryFolder}
-              onValueChange={(v) => {
-                setLibraryFolder(v);
-                setSelectedLibraryIds(new Set());
-                fetchLibraryImages(v);
-              }}
-            >
-              <SelectTrigger className="w-52">
-                <SelectValue placeholder="Folder" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Media</SelectItem>
-                {libraryFolders.map((folder) => (
-                  <SelectItem key={folder.id} value={folder.id}>
-                    {folder.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={addCurrentFolderImages}
-              disabled={libraryFolder === "all" || libraryImages.length === 0}
-            >
-              Add Folder
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="bg-teal-600 hover:bg-teal-700 text-white"
-              onClick={addSelectedLibraryImages}
-              disabled={selectedLibraryIds.size === 0}
-            >
-              Add Selected ({selectedLibraryIds.size})
-            </Button>
-          </div>
-          {libraryLoading ? (
-            <div className="p-8 text-center text-slate-500">Loading images...</div>
-          ) : libraryImages.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">No images found in this folder</div>
-          ) : (
-            <div className="grid grid-cols-3 gap-3">
-              {libraryImages.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    const next = new Set(selectedLibraryIds);
-                    if (next.has(item.id)) next.delete(item.id);
-                    else next.add(item.id);
-                    setSelectedLibraryIds(next);
-                  }}
-                  className={`group text-left border rounded-lg overflow-hidden ${
-                    selectedLibraryIds.has(item.id)
-                      ? "border-teal-400 ring-2 ring-teal-200"
-                      : "border-slate-200 hover:border-teal-300"
-                  }`}
-                >
-                  <img src={item.imageUrl} alt="AI Studio" className="h-36 w-full object-cover bg-slate-50" />
-                  <div className="p-2">
-                    <p className="text-[11px] text-slate-500">{new Date(item.createdAt).toLocaleString()}</p>
-                    <p className="text-xs text-teal-700 mt-1">
-                      {selectedLibraryIds.has(item.id) ? "Selected" : "Click to select"}
-                    </p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -539,7 +388,6 @@ interface MarketplaceConn {
 
 export function Products() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [aiCredits, setAiCredits] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -553,9 +401,6 @@ export function Products() {
   const [saving, setSaving] = useState(false);
   const [connections, setConnections] = useState<MarketplaceConn[]>([]);
   const [pushing, setPushing] = useState(false);
-  const [enhancing, setEnhancing] = useState(false);
-  const [enhanceProgress, setEnhanceProgress] = useState("");
-  const [enhanceBackground, setEnhanceBackground] = useState("studio");
 
   // Advertise state
   const [advertiseProduct, setAdvertiseProduct] = useState<Product | null>(null);
@@ -565,14 +410,6 @@ export function Products() {
   const [brief, setBrief] = useState("");
   const [nicheFilter, setNicheFilter] = useState("all");
   const [sendingRequest, setSendingRequest] = useState(false);
-
-  const creditClassName = aiCredits === null
-    ? "text-teal-700"
-    : aiCredits <= 0
-      ? "text-red-600"
-      : aiCredits <= 5
-        ? "text-amber-600"
-        : "text-teal-700";
 
   const openAdvertise = (product: Product) => {
     setAdvertiseProduct(product);
@@ -613,45 +450,6 @@ export function Products() {
       toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to send request");
     } finally { setSendingRequest(false); }
   };
-
-  const handleEnhanceAllImages = async () => {
-    if (form.images.length === 0) {
-      toast.error("Please upload at least one image first");
-      return;
-    }
-    setEnhancing(true);
-    const newImages = [...form.images];
-    let enhanced = 0;
-    try {
-      for (let i = 0; i < newImages.length; i++) {
-        setEnhanceProgress(`Enhancing image ${i + 1} of ${newImages.length}...`);
-        const res = await api.post("/products/enhance-image", {
-          image: newImages[i],
-          title: form.title,
-          description: form.description,
-          background: enhanceBackground
-        });
-        newImages[i] = res.data.image;
-        if (typeof res.data?.remainingCredits === "number") {
-          setAiCredits(res.data.remainingCredits);
-        }
-        enhanced++;
-      }
-      setForm({ ...form, images: newImages });
-      toast.success(`${enhanced} image(s) enhanced successfully!`);
-    } catch (err: unknown) {
-      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to enhance images.";
-      toast.error(message);
-      // Still save whatever we managed to enhance
-      if (enhanced > 0) {
-        setForm({ ...form, images: newImages });
-      }
-    } finally {
-      setEnhancing(false);
-      setEnhanceProgress("");
-    }
-  };
-  
   const pageSize = 20;
 
   const fetchProducts = () => {
@@ -675,9 +473,6 @@ export function Products() {
     api.get("/marketplaces").then((res) => {
       setConnections(res.data.filter((c: MarketplaceConn) => c.status === "CONNECTED"));
     }).catch(() => {});
-    api.get("/user/ai-credits")
-      .then((res) => setAiCredits(res.data.remainingCredits))
-      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -710,12 +505,12 @@ export function Products() {
       currency: product.currency,
       quantity: String(product.quantity),
       category: product.category || "",
-      productType: (product as Record<string, unknown>).productType as string || "",
-      vendor: (product as Record<string, unknown>).vendor as string || "",
+      productType: product.productType || "",
+      vendor: product.vendor || "",
       tags: Array.isArray(product.tags) ? product.tags : [],
-      weight: (product as Record<string, unknown>).weight ? String((product as Record<string, unknown>).weight) : "",
-      weightUnit: ((product as Record<string, unknown>).weightUnit as string) || "kg",
-      images: Array.isArray(product.images) ? (product.images as string[]) : [],
+      weight: product.weight ? String(product.weight) : "",
+      weightUnit: product.weightUnit || "kg",
+      images: Array.isArray(product.images) ? product.images : [],
       status: product.status,
     });
     setDialogOpen(true);
@@ -822,14 +617,6 @@ export function Products() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Products</h1>
           <p className="text-slate-500 text-sm mt-1">{total} products total</p>
-          <p className={`text-sm mt-1 font-medium ${creditClassName}`}>
-            AI Credits: {aiCredits ?? "—"} / 50 (resets every Monday)
-          </p>
-          {aiCredits !== null && aiCredits <= 0 && (
-            <p className="text-xs text-red-600 mt-1">
-              You have exhausted your weekly AI credits. Credits will reset on Monday.
-            </p>
-          )}
         </div>
         <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700 text-white">
           <Plus className="h-4 w-4 mr-2" />
@@ -1161,52 +948,6 @@ export function Products() {
               images={form.images}
               onChange={(images) => setForm({ ...form, images })}
             />
-
-            {/* AI Enhancement Button */}
-            {form.images.length > 0 && (
-              <div className="mt-3 space-y-2">
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleEnhanceAllImages}
-                    disabled={enhancing}
-                    className="flex-1 border-teal-200 text-teal-700 hover:bg-teal-50 hover:border-teal-300 transition-all"
-                  >
-                    {enhancing ? (
-                      <>
-                        <svg className="animate-spin h-4 w-4 mr-2 text-teal-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        {enhanceProgress || "Enhancing..."}
-                      </>
-                    ) : (
-                      <>
-                        <ImagePlus className="h-4 w-4 mr-2" />
-                        AI Enhancement
-                      </>
-                    )}
-                  </Button>
-                  <Select value={enhanceBackground} onValueChange={setEnhanceBackground}>
-                    <SelectTrigger className="w-[150px] border-teal-200 text-teal-700">
-                      <SelectValue placeholder="Background" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="studio">Studio</SelectItem>
-                      <SelectItem value="kitchen">Kitchen</SelectItem>
-                      <SelectItem value="mall">Mall</SelectItem>
-                      <SelectItem value="outdoor">Outdoor</SelectItem>
-                      <SelectItem value="living_room">Living Room</SelectItem>
-                      <SelectItem value="office">Office</SelectItem>
-                      <SelectItem value="nature">Nature</SelectItem>
-                      <SelectItem value="gradient">Gradient</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-              </div>
-            )}
 
             <hr className="border-slate-200" />
 

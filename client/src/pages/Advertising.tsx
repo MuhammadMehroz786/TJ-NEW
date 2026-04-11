@@ -82,6 +82,7 @@ export function Advertising() {
     { value: "all", label: "All" },
     { value: "IN_PROGRESS", label: "Active" },
     { value: "SUBMITTED", label: "Review" },
+    { value: "REVISION_REQUESTED", label: "Revision" },
     { value: "COMPLETED", label: "Completed" },
   ];
 

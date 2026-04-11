@@ -50,7 +50,7 @@ const marketplaces = [
 export function Marketplaces() {
   const navigate = useNavigate();
   const [connections, setConnections] = useState<Connection[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [connectingPlatform, setConnectingPlatform] = useState("");
   const [storeName, setStoreName] = useState("");

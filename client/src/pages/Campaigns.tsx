@@ -211,7 +211,7 @@ export function Campaigns() {
                   </div>
                 )}
 
-                {(selected.status === "SUBMITTED" || selected.status === "COMPLETED" || selected.status === "APPROVED") && selected.socialLinks?.length > 0 && (
+                {(selected.status === "SUBMITTED" || selected.status === "COMPLETED") && selected.socialLinks?.length > 0 && (
                   <div>
                     <p className="text-sm font-medium text-slate-700 mb-2">Submitted Links</p>
                     <div className="space-y-2">
