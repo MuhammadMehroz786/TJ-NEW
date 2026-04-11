@@ -121,7 +121,7 @@ export async function downloadWhatsAppMedia(imageId: string): Promise<{ base64: 
 
 export async function uploadWhatsAppMedia(base64: string, mimeType: string): Promise<string> {
   const token = getRequiredEnv("WHATSAPP_TOKEN");
-  const version = process.env.WHATSAPP_GRAPH_VERSION || "v21.0";
+  const version = process.env.WHATSAPP_GRAPH_VERSION || "v22.0";
   const phoneNumberId = getRequiredEnv("WHATSAPP_PHONE_NUMBER_ID");
 
   const buffer = Buffer.from(base64, "base64");

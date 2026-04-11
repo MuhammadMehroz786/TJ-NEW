@@ -94,7 +94,7 @@ export function AIStudio() {
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === "string") {
-          setSelectedImages((prev) => [...prev, reader.result]);
+          setSelectedImages((prev) => [...prev, reader.result as string]);
         }
       };
       reader.readAsDataURL(file);
