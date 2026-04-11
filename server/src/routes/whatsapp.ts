@@ -22,7 +22,7 @@ function normalizeAnswer(content: string | undefined, interactiveTitle: string |
 }
 
 const STUDIO_SCENE =
-  "a clean pure white studio background with professional soft-box lighting and a subtle shadow underneath the product";
+  "a clean pure white infinity-curve studio background with professional three-point lighting (key light, fill light, and rim light), creating soft natural shadows beneath and behind the product";
 
 async function enhanceProductImage(
   base64: string,
@@ -32,14 +32,32 @@ async function enhanceProductImage(
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
 
   const ai = new GoogleGenAI({ apiKey });
-  const prompt = `Edit this product image with the following instructions:
-1. KEEP THE PRODUCT EXACTLY AS IT IS — do NOT change, modify, or regenerate the product itself.
-2. REMOVE the current background completely.
-3. REPLACE the background with: ${STUDIO_SCENE}.
-4. IMPROVE the overall image quality: enhance sharpness, fix lighting to look professional, improve color balance, and increase clarity.
-5. Make the product look like it was photographed by a professional e-commerce photographer.
-6. Do NOT add any text, watermarks, or logos.
-7. The final result should look like a high-quality, professional product photograph.`;
+  const prompt = `You are a professional e-commerce product photographer. Edit this product image following these strict rules:
+
+PRODUCT PRESERVATION (most important):
+- Keep the product EXACTLY as it is — same shape, size, proportions, colors, textures, labels, and details.
+- Do NOT alter, regenerate, distort, or artistically reinterpret the product in any way.
+- Maintain the product's original scale and perspective angle.
+
+BACKGROUND REPLACEMENT:
+- Completely remove the existing background.
+- Replace it with: ${STUDIO_SCENE}.
+- The new background must look photorealistic and naturally match the product's perspective and viewing angle.
+
+LIGHTING & SHADOWS:
+- Adjust the product's lighting to seamlessly match the new background environment.
+- Add realistic, soft contact shadows beneath the product that match the light direction of the scene.
+- Ensure consistent color temperature between the product and background.
+
+IMAGE QUALITY:
+- Output a sharp, high-resolution, professional e-commerce photograph.
+- Enhance clarity and detail on the product without changing its appearance.
+
+STRICT RULES:
+- Do NOT add any text, watermarks, logos, or branding.
+- Do NOT add extra objects, props, or decorations.
+- Do NOT crop or change the framing — keep the product centered.
+- The result must look like an authentic photograph, not a composite.`;
 
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-image",

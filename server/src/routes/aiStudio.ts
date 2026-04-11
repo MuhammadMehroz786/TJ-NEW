@@ -14,14 +14,22 @@ router.use(authenticate);
 router.use(requireRole("MERCHANT"));
 
 const backgroundScenes: Record<string, string> = {
-  studio: "a clean pure white studio background with professional soft-box lighting and a subtle shadow underneath the product",
-  kitchen: "a modern luxury kitchen countertop with marble surface, warm ambient lighting, and slightly blurred kitchen appliances in the background",
-  mall: "a premium shopping mall display shelf with elegant retail store lighting, soft spotlights, and glass shelving",
-  outdoor: "a beautiful outdoor setting with soft golden-hour sunlight and a lush green bokeh background",
-  living_room: "a cozy modern living room with stylish furniture, warm natural light coming from large windows",
-  office: "a sleek modern office desk with clean workspace, minimalist decor, and professional lighting",
-  nature: "a natural organic setting with a wooden surface, fresh green leaves and plants in soft-focus background",
-  gradient: "a smooth gradient background with soft pastel tones, clean and modern with no distractions",
+  studio:
+    "a clean pure white infinity-curve studio background with professional three-point lighting (key light, fill light, and rim light), creating soft natural shadows beneath and behind the product",
+  kitchen:
+    "a modern luxury kitchen countertop made of white Carrara marble, with warm ambient lighting, a subtle depth-of-field blur on stainless steel appliances and a herb plant in the far background",
+  mall:
+    "a premium shopping mall display shelf with elegant recessed spotlights, polished glass shelving, and a softly blurred luxury retail environment behind",
+  outdoor:
+    "a beautiful outdoor tabletop setting during golden hour with warm directional sunlight, a lush green garden with creamy bokeh in the background, and a natural wooden surface",
+  living_room:
+    "a cozy modern Scandinavian living room side table, with soft diffused natural light streaming from large windows, a neutral-toned sofa and indoor plant softly blurred behind",
+  office:
+    "a sleek modern office desk with clean minimalist decor, a matte white surface, soft overhead LED panel lighting, and a subtly blurred monitor and bookshelf in the background",
+  nature:
+    "a rustic natural setting with a light-toned wooden surface, fresh green leaves and small potted plants arranged around, with soft dappled sunlight and a shallow depth-of-field background",
+  gradient:
+    "a smooth seamless gradient background transitioning from soft warm white to light grey, with subtle ambient lighting from above creating a gentle shadow beneath the product",
 };
 
 function parseBase64Image(input: string): { mimeType: string; base64: string; ext: string } {
@@ -181,15 +189,34 @@ router.post("/enhance", async (req: AuthRequest, res: Response): Promise<void> =
 
     const sceneName = background && backgroundScenes[background] ? background : "studio";
     const sceneDescription = backgroundScenes[sceneName];
-    const fixedPrompt = `Edit this product image with the following instructions:
+    const fixedPrompt = `You are a professional e-commerce product photographer. Edit this product image following these strict rules:
 
-1. KEEP THE PRODUCT EXACTLY AS IT IS — do NOT change, modify, or regenerate the product itself.
-2. REMOVE the current background completely.
-3. REPLACE the background with: ${sceneDescription}.
-4. IMPROVE the overall image quality: enhance sharpness, fix lighting to look professional, improve color balance, and increase clarity.
-5. Make the product look like it was photographed by a professional e-commerce photographer.
-6. Do NOT add any text, watermarks, or logos.
-7. The final result should look like a high-quality, professional product photograph.`;
+PRODUCT PRESERVATION (most important):
+- Keep the product EXACTLY as it is — same shape, size, proportions, colors, textures, labels, and details.
+- Do NOT alter, regenerate, distort, or artistically reinterpret the product in any way.
+- Maintain the product's original scale and perspective angle.
+
+BACKGROUND REPLACEMENT:
+- Completely remove the existing background.
+- Replace it with: ${sceneDescription}.
+- The new background must look photorealistic and naturally match the product's perspective and viewing angle.
+
+LIGHTING & SHADOWS:
+- Adjust the product's lighting to seamlessly match the new background environment.
+- Add realistic, soft contact shadows beneath the product that match the light direction of the scene.
+- Ensure consistent color temperature between the product and background.
+- Add subtle reflections on glossy surfaces if the background surface would naturally produce them.
+
+IMAGE QUALITY:
+- Output a sharp, high-resolution, professional e-commerce photograph.
+- Enhance clarity and detail on the product without changing its appearance.
+- Use proper white balance and color grading appropriate for the scene.
+
+STRICT RULES:
+- Do NOT add any text, watermarks, logos, or branding.
+- Do NOT add extra objects, props, or decorations that weren't specified in the background.
+- Do NOT crop or change the framing — keep the product centered and properly composed.
+- The result must look like an authentic photograph, not a composite or collage.`;
 
     const parsedInput = parseBase64Image(image);
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
