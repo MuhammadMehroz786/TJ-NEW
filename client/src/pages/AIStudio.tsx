@@ -119,7 +119,7 @@ export function AIStudio() {
           image: selectedImages[i],
           background,
           folderId: selectedFolderId === "all" ? null : selectedFolderId,
-        });
+        }, { timeout: 120000 });
         newRecords.push(res.data);
         if (typeof res.data?.remainingCredits === "number") {
           setAiCredits(res.data.remainingCredits);
@@ -200,7 +200,8 @@ export function AIStudio() {
       const res = await api.patch(`/ai-studio/images/${imageId}/folder`, { folderId });
       setImages((prev) => prev.map((img) => (img.id === imageId ? res.data : img)));
       fetchFolders();
-      toast.success(folderId ? "Moved to folder" : "Moved to Media");
+      const folderName = folderId ? folders.find((f) => f.id === folderId)?.name : null;
+      toast.success(folderName ? `Moved to "${folderName}"` : "Moved to Media");
     } catch {
       toast.error("Failed to move image");
     }

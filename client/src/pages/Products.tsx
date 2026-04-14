@@ -16,6 +16,8 @@ import {
   Store,
   ShoppingBag,
   Megaphone,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -75,6 +77,17 @@ interface Product {
   createdAt: string;
   updatedAt: string;
 }
+
+const backgroundOptions = [
+  { value: "studio", label: "Studio" },
+  { value: "kitchen", label: "Kitchen" },
+  { value: "mall", label: "Mall" },
+  { value: "outdoor", label: "Outdoor" },
+  { value: "living_room", label: "Living Room" },
+  { value: "office", label: "Office" },
+  { value: "nature", label: "Nature" },
+  { value: "gradient", label: "Gradient" },
+];
 
 const statusColors: Record<string, string> = {
   ACTIVE: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -180,9 +193,11 @@ function TagInput({
 function ImageUploadSection({
   images,
   onChange,
+  onOpenStudioPicker,
 }: {
   images: string[];
   onChange: (images: string[]) => void;
+  onOpenStudioPicker?: () => void;
 }) {
   const [dragging, setDragging] = useState(false);
   const [urlInput, setUrlInput] = useState("");
@@ -264,10 +279,9 @@ function ImageUploadSection({
         className={`
           relative border-2 border-dashed rounded-lg p-6 text-center cursor-pointer
           transition-all duration-200
-          ${
-            dragging
-              ? "border-teal-400 bg-teal-50/60"
-              : "border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50"
+          ${dragging
+            ? "border-teal-400 bg-teal-50/60"
+            : "border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50"
           }
         `}
       >
@@ -281,9 +295,8 @@ function ImageUploadSection({
         />
         <div className="flex flex-col items-center gap-2">
           <div
-            className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors ${
-              dragging ? "bg-teal-100" : "bg-slate-100"
-            }`}
+            className={`h-10 w-10 rounded-full flex items-center justify-center transition-colors ${dragging ? "bg-teal-100" : "bg-slate-100"
+              }`}
           >
             <Upload className={`h-5 w-5 ${dragging ? "text-teal-600" : "text-slate-400"}`} />
           </div>
@@ -316,6 +329,18 @@ function ImageUploadSection({
           <ImagePlus className="h-4 w-4 mr-1" />
           Add
         </Button>
+        {onOpenStudioPicker && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onOpenStudioPicker}
+            className="shrink-0 border-teal-200 text-teal-700 hover:bg-teal-50"
+          >
+            <Sparkles className="h-4 w-4 mr-1" />
+            AI Studio
+          </Button>
+        )}
       </div>
 
       {/* Image Previews */}
@@ -388,6 +413,7 @@ interface MarketplaceConn {
 
 export function Products() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [aiCredits, setAiCredits] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -401,6 +427,18 @@ export function Products() {
   const [saving, setSaving] = useState(false);
   const [connections, setConnections] = useState<MarketplaceConn[]>([]);
   const [pushing, setPushing] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceProgress, setEnhanceProgress] = useState("");
+  const [enhanceBackground, setEnhanceBackground] = useState("studio");
+
+  // AI Studio picker state
+  const [studioPickerOpen, setStudioPickerOpen] = useState(false);
+  const [studioImages, setStudioImages] = useState<Array<{ id: string; imageUrl: string; background?: string; folder?: { id: string; name: string } | null }>>([]);
+  const [studioFolders, setStudioFolders] = useState<Array<{ id: string; name: string; _count: { images: number } }>>([]);
+  const [studioFolderFilter, setStudioFolderFilter] = useState("all");
+  const [studioPickerLoading, setStudioPickerLoading] = useState(false);
+  const [studioSelected, setStudioSelected] = useState<Set<string>>(new Set());
+  const [studioSearch, setStudioSearch] = useState("");
 
   // Advertise state
   const [advertiseProduct, setAdvertiseProduct] = useState<Product | null>(null);
@@ -411,6 +449,14 @@ export function Products() {
   const [nicheFilter, setNicheFilter] = useState("all");
   const [sendingRequest, setSendingRequest] = useState(false);
 
+  const creditClassName = aiCredits === null
+    ? "text-teal-700"
+    : aiCredits <= 0
+      ? "text-red-600"
+      : aiCredits <= 5
+        ? "text-amber-600"
+        : "text-teal-700";
+
   const openAdvertise = (product: Product) => {
     setAdvertiseProduct(product);
     setSelectedCreator(null);
@@ -419,7 +465,7 @@ export function Products() {
     setCreatorsLoading(true);
     api.get("/creators", { params: { limit: "50", sort: "followers" } })
       .then((res) => setCreators(res.data.data))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setCreatorsLoading(false));
   };
 
@@ -430,7 +476,7 @@ export function Products() {
     if (niche !== "all") params.niche = niche;
     api.get("/creators", { params })
       .then((res) => setCreators(res.data.data))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setCreatorsLoading(false));
   };
 
@@ -450,6 +496,83 @@ export function Products() {
       toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to send request");
     } finally { setSendingRequest(false); }
   };
+
+  const openStudioPicker = () => {
+    setStudioPickerOpen(true);
+    setStudioSelected(new Set());
+    setStudioFolderFilter("all");
+    setStudioSearch("");
+    setStudioPickerLoading(true);
+    Promise.all([
+      api.get("/ai-studio/folders"),
+      api.get("/ai-studio/library", { params: { folderId: "all" } }),
+    ])
+      .then(([foldersRes, imagesRes]) => {
+        setStudioFolders(foldersRes.data);
+        setStudioImages(imagesRes.data.data);
+      })
+      .catch(() => toast.error("Failed to load AI Studio media"))
+      .finally(() => setStudioPickerLoading(false));
+  };
+
+  const loadStudioFolder = (folderId: string) => {
+    setStudioFolderFilter(folderId);
+    setStudioPickerLoading(true);
+    api.get("/ai-studio/library", { params: { folderId } })
+      .then((res) => setStudioImages(res.data.data))
+      .catch(() => toast.error("Failed to load folder"))
+      .finally(() => setStudioPickerLoading(false));
+  };
+
+  const addStudioImages = () => {
+    const urls = studioImages
+      .filter((img) => studioSelected.has(img.id))
+      .map((img) => img.imageUrl);
+    setForm((prev) => ({ ...prev, images: [...prev.images, ...urls] }));
+    setStudioPickerOpen(false);
+    setStudioSelected(new Set());
+  };
+
+  const handleEnhanceAllImages = async () => {
+    const base64Images = form.images.filter((img) => img.startsWith("data:"));
+    if (base64Images.length === 0) {
+      toast.error("Upload images from your device first to enhance them");
+      return;
+    }
+    setEnhancing(true);
+    const newImages = [...form.images];
+    let enhanced = 0;
+    let base64Idx = 0;
+    try {
+      for (let i = 0; i < newImages.length; i++) {
+        if (!newImages[i].startsWith("data:")) continue;
+        base64Idx++;
+        setEnhanceProgress(`Enhancing image ${base64Idx} of ${base64Images.length}...`);
+        const res = await api.post("/ai-studio/enhance", {
+          image: newImages[i],
+          background: enhanceBackground,
+          folderId: null,
+        }, { timeout: 120000 });
+        newImages[i] = res.data.imageUrl;
+        if (typeof res.data?.remainingCredits === "number") {
+          setAiCredits(res.data.remainingCredits);
+        }
+        enhanced++;
+      }
+      setForm({ ...form, images: newImages });
+      toast.success(`${enhanced} image(s) enhanced successfully!`);
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to enhance images.";
+      toast.error(message);
+      if (enhanced > 0) {
+        setForm({ ...form, images: newImages });
+      }
+    } finally {
+      setEnhancing(false);
+      setEnhanceProgress("");
+    }
+  };
+
   const pageSize = 20;
 
   const fetchProducts = () => {
@@ -472,7 +595,10 @@ export function Products() {
   useEffect(() => {
     api.get("/marketplaces").then((res) => {
       setConnections(res.data.filter((c: MarketplaceConn) => c.status === "CONNECTED"));
-    }).catch(() => {});
+    }).catch(() => { });
+    api.get("/user/ai-credits")
+      .then((res) => setAiCredits(res.data.remainingCredits))
+      .catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -617,6 +743,14 @@ export function Products() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Products</h1>
           <p className="text-slate-500 text-sm mt-1">{total} products total</p>
+          <p className={`text-sm mt-1 font-medium ${creditClassName}`}>
+            AI Credits: {aiCredits ?? "—"} / 50 (resets every Monday)
+          </p>
+          {aiCredits !== null && aiCredits <= 0 && (
+            <p className="text-xs text-red-600 mt-1">
+              You have exhausted your weekly AI credits. Credits will reset on Monday.
+            </p>
+          )}
         </div>
         <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700 text-white">
           <Plus className="h-4 w-4 mr-2" />
@@ -947,7 +1081,60 @@ export function Products() {
             <ImageUploadSection
               images={form.images}
               onChange={(images) => setForm({ ...form, images })}
+              onOpenStudioPicker={openStudioPicker}
             />
+
+            {/* AI Enhancement */}
+            {form.images.length > 0 && (
+              <div className="p-3 rounded-lg border border-teal-100 bg-teal-50/40 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-4 w-4 text-teal-600" />
+                    <span className="text-xs font-semibold text-teal-800">AI Enhancement</span>
+                  </div>
+                  <span className={`text-xs font-medium ${creditClassName}`}>
+                    {aiCredits ?? "—"} / 50 credits
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleEnhanceAllImages}
+                    disabled={enhancing || !form.images.some((img) => img.startsWith("data:")) || (aiCredits !== null && aiCredits <= 0)}
+                    className="flex-1 border-teal-200 text-teal-700 hover:bg-teal-50 hover:border-teal-300 transition-all"
+                  >
+                    {enhancing ? (
+                      <>
+                        <Loader2 className="animate-spin h-4 w-4 mr-2 text-teal-600" />
+                        {enhanceProgress || "Enhancing..."}
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Enhance All
+                      </>
+                    )}
+                  </Button>
+                  <Select value={enhanceBackground} onValueChange={setEnhanceBackground}>
+                    <SelectTrigger className="w-[150px] border-teal-200 text-teal-700">
+                      <SelectValue placeholder="Background" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {backgroundOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {!form.images.some((img) => img.startsWith("data:")) && (
+                  <p className="text-[11px] text-slate-400 italic">Upload images from your device to enable enhancement</p>
+                )}
+                {aiCredits !== null && aiCredits <= 0 && (
+                  <p className="text-[11px] text-red-500">No credits remaining. Resets every Monday.</p>
+                )}
+              </div>
+            )}
 
             <hr className="border-slate-200" />
 
@@ -1116,6 +1303,130 @@ export function Products() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Studio Picker Dialog */}
+      <Dialog open={studioPickerOpen} onOpenChange={(open) => { if (!open) { setStudioPickerOpen(false); setStudioSelected(new Set()); } }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100 shrink-0">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Pick from AI Studio</h2>
+              <p className="text-xs text-slate-400 mt-0.5">Select images to add to your product</p>
+            </div>
+            {studioSelected.size > 0 && (
+              <span className="text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200 px-2.5 py-1 rounded-full">
+                {studioSelected.size} selected
+              </span>
+            )}
+          </div>
+
+          {/* Folder tab bar */}
+          <div className="px-6 pt-3 pb-0 shrink-0">
+            <div className="flex items-center gap-2 overflow-x-auto pb-3 scrollbar-hide" style={{ scrollbarWidth: "none" }}>
+              {[{ id: "all", name: "All Media", count: studioImages.length }, ...studioFolders.map((f) => ({ id: f.id, name: f.name, count: f._count.images }))].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => loadStudioFolder(tab.id)}
+                  className={`shrink-0 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-medium transition-all border ${
+                    studioFolderFilter === tab.id
+                      ? "bg-teal-600 text-white border-teal-600 shadow-sm"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-teal-300 hover:text-teal-700 hover:bg-teal-50"
+                  }`}
+                >
+                  {tab.name}
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-normal ${studioFolderFilter === tab.id ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-400"}`}>
+                    {tab.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="h-px bg-slate-100" />
+          </div>
+
+          {/* Image grid */}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {studioPickerLoading ? (
+              <div className="grid grid-cols-3 gap-3">
+                {[1,2,3,4,5,6].map((i) => (
+                  <div key={i} className="aspect-square rounded-xl bg-slate-100 animate-pulse" />
+                ))}
+              </div>
+            ) : studioImages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-56 text-slate-400">
+                <Sparkles className="h-10 w-10 mb-3 text-slate-200" />
+                <p className="text-sm font-medium text-slate-500">No images here yet</p>
+                <p className="text-xs mt-1 text-slate-400">Enhance images in AI Studio to see them here</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                {studioImages.map((img) => {
+                  const selected = studioSelected.has(img.id);
+                  return (
+                    <button
+                      key={img.id}
+                      type="button"
+                      onClick={() => {
+                        const next = new Set(studioSelected);
+                        if (next.has(img.id)) next.delete(img.id);
+                        else next.add(img.id);
+                        setStudioSelected(next);
+                      }}
+                      className={`relative aspect-square rounded-xl overflow-hidden transition-all duration-150 ${
+                        selected
+                          ? "ring-2 ring-teal-500 ring-offset-2 scale-[0.97]"
+                          : "ring-1 ring-slate-200 hover:ring-teal-300 hover:scale-[0.98]"
+                      }`}
+                    >
+                      <img src={img.imageUrl} alt="" className="h-full w-full object-cover bg-slate-100" />
+                      {/* Folder badge */}
+                      {img.folder && (
+                        <div className="absolute bottom-2 left-2">
+                          <span className="text-[10px] bg-black/50 text-white px-1.5 py-0.5 rounded backdrop-blur-sm">
+                            {img.folder.name}
+                          </span>
+                        </div>
+                      )}
+                      {/* Selection overlay */}
+                      {selected && (
+                        <div className="absolute inset-0 bg-teal-600/15">
+                          <div className="absolute top-2 right-2 h-7 w-7 rounded-full bg-teal-600 shadow-md flex items-center justify-center">
+                            <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/60 shrink-0">
+            <p className="text-sm text-slate-500">
+              {studioSelected.size === 0
+                ? "Click any image to select it"
+                : `${studioSelected.size} image${studioSelected.size > 1 ? "s" : ""} ready to add`}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => { setStudioPickerOpen(false); setStudioSelected(new Set()); }}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="bg-teal-600 hover:bg-teal-700 text-white px-5"
+                disabled={studioSelected.size === 0}
+                onClick={addStudioImages}
+              >
+                Add {studioSelected.size > 0 ? `${studioSelected.size} ` : ""}Image{studioSelected.size !== 1 ? "s" : ""}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

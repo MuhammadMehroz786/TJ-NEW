@@ -272,6 +272,8 @@ router.post("/push", async (req: AuthRequest, res: Response): Promise<void> => {
   }
 });
 
+
+
 // PATCH /api/products/bulk
 router.patch("/bulk", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
