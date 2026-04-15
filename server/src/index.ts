@@ -17,12 +17,17 @@ import manualSaleRoutes from "./routes/manualSales";
 import marketplaceProductRoutes from "./routes/marketplace";
 import aiStudioRoutes from "./routes/aiStudio";
 import whatsappRoutes from "./routes/whatsapp";
+import creditsRoutes from "./routes/credits";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 const allowedOrigins = ["http://localhost:5173", "http://46.101.101.241"];
 app.use(cors({ origin: allowedOrigins, credentials: true }));
+
+// Stripe webhook needs raw body — register BEFORE express.json()
+app.use("/api/credits/webhook", express.raw({ type: "application/json" }));
+
 app.use(express.json({ limit: "50mb" }));
 app.use("/media", express.static(path.resolve(process.cwd(), "storage")));
 
@@ -40,6 +45,7 @@ app.use("/api/manual-sales", manualSaleRoutes);
 app.use("/api/marketplace", marketplaceProductRoutes);
 app.use("/api/ai-studio", aiStudioRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/credits", creditsRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });

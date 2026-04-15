@@ -13,70 +13,120 @@ function getMondayKeyUTC(date = new Date()): string {
 export class AICreditError extends Error {
   code = "AI_CREDITS_EXHAUSTED";
   status = 403;
-  constructor(message = "AI credits exhausted. Credits reset every Monday.") {
+  constructor(message = "AI credits exhausted. Purchase more credits or wait for your weekly reset on Monday.") {
     super(message);
   }
 }
 
-export async function consumeWeeklyAICredit(prisma: PrismaClient, userId: string): Promise<{ remainingCredits: number; resetWeek: string }> {
+/**
+ * Consume 1 credit with priority drain:
+ *   1. Weekly free credits (aiCredits) drain first
+ *   2. Purchased credits (purchasedCredits) drain after weekly is 0
+ * Weekly credits auto-reset to 50 on a new week — purchased credits are NEVER reset.
+ */
+export async function consumeWeeklyAICredit(
+  prisma: PrismaClient,
+  userId: string
+): Promise<{ weeklyCredits: number; purchasedCredits: number; totalCredits: number; resetWeek: string }> {
   const currentWeekKey = getMondayKeyUTC();
 
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({
       where: { id: userId },
-      select: { id: true, aiCredits: true, aiCreditsWeekKey: true },
+      select: { id: true, aiCredits: true, aiCreditsWeekKey: true, purchasedCredits: true },
     });
 
-    if (!user) {
-      throw new Error("User not found");
-    }
+    if (!user) throw new Error("User not found");
 
-    let credits = user.aiCredits;
+    // Auto-reset weekly credits if it's a new week (purchased credits untouched)
+    let weeklyCredits = user.aiCredits;
     if (user.aiCreditsWeekKey !== currentWeekKey) {
       const reset = await tx.user.update({
         where: { id: userId },
         data: { aiCredits: WEEKLY_AI_CREDITS, aiCreditsWeekKey: currentWeekKey },
         select: { aiCredits: true },
       });
-      credits = reset.aiCredits;
+      weeklyCredits = reset.aiCredits;
     }
 
-    if (credits <= 0) {
-      throw new AICreditError();
+    const purchasedCredits = user.purchasedCredits;
+    const totalCredits = weeklyCredits + purchasedCredits;
+
+    if (totalCredits <= 0) throw new AICreditError();
+
+    // Priority: drain weekly first, then purchased
+    let updatedWeekly = weeklyCredits;
+    let updatedPurchased = purchasedCredits;
+
+    if (weeklyCredits > 0) {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: { aiCredits: { decrement: 1 } },
+        select: { aiCredits: true, purchasedCredits: true },
+      });
+      updatedWeekly = updated.aiCredits;
+      updatedPurchased = updated.purchasedCredits;
+    } else {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: { purchasedCredits: { decrement: 1 } },
+        select: { aiCredits: true, purchasedCredits: true },
+      });
+      updatedWeekly = updated.aiCredits;
+      updatedPurchased = updated.purchasedCredits;
     }
 
-    const updated = await tx.user.update({
-      where: { id: userId },
-      data: { aiCredits: { decrement: 1 } },
-      select: { aiCredits: true },
-    });
-
-    return { remainingCredits: updated.aiCredits, resetWeek: currentWeekKey };
+    return {
+      weeklyCredits: updatedWeekly,
+      purchasedCredits: updatedPurchased,
+      totalCredits: updatedWeekly + updatedPurchased,
+      resetWeek: currentWeekKey,
+    };
   });
 }
 
-export async function getWeeklyAICredits(prisma: PrismaClient, userId: string): Promise<{ remainingCredits: number; resetWeek: string }> {
+/**
+ * Get current credit balance without consuming any.
+ * Also auto-resets weekly credits if a new week has started.
+ */
+export async function getAICredits(
+  prisma: PrismaClient,
+  userId: string
+): Promise<{ weeklyCredits: number; purchasedCredits: number; totalCredits: number; resetWeek: string }> {
   const currentWeekKey = getMondayKeyUTC();
 
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({
       where: { id: userId },
-      select: { id: true, aiCredits: true, aiCreditsWeekKey: true },
+      select: { id: true, aiCredits: true, aiCreditsWeekKey: true, purchasedCredits: true },
     });
 
-    if (!user) {
-      throw new Error("User not found");
-    }
+    if (!user) throw new Error("User not found");
 
+    let weeklyCredits = user.aiCredits;
     if (user.aiCreditsWeekKey !== currentWeekKey) {
       const reset = await tx.user.update({
         where: { id: userId },
         data: { aiCredits: WEEKLY_AI_CREDITS, aiCreditsWeekKey: currentWeekKey },
         select: { aiCredits: true },
       });
-      return { remainingCredits: reset.aiCredits, resetWeek: currentWeekKey };
+      weeklyCredits = reset.aiCredits;
     }
 
-    return { remainingCredits: user.aiCredits, resetWeek: currentWeekKey };
+    return {
+      weeklyCredits,
+      purchasedCredits: user.purchasedCredits,
+      totalCredits: weeklyCredits + user.purchasedCredits,
+      resetWeek: currentWeekKey,
+    };
   });
 }
+
+// Keep legacy export for backwards compatibility with existing callers
+export const getWeeklyAICredits = async (
+  prisma: PrismaClient,
+  userId: string
+): Promise<{ remainingCredits: number; resetWeek: string }> => {
+  const result = await getAICredits(prisma, userId);
+  return { remainingCredits: result.totalCredits, resetWeek: result.resetWeek };
+};

@@ -46,16 +46,23 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum CreditPurchaseStatus {
+  PENDING
+  COMPLETED
+  REFUNDED
+}
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
   password  String
   name      String
   role      UserRole @default(MERCHANT)
-  aiCredits Int      @default(50)
-  aiCreditsWeekKey String @default("")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  aiCredits        Int      @default(50)
+  aiCreditsWeekKey String   @default("")
+  purchasedCredits Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   marketplaceConnections MarketplaceConnection[]
   products               Product[]
@@ -69,6 +76,7 @@ model User {
   aiStudioImages         AiStudioImage[]
   aiStudioFolders        AiStudioFolder[]
   whatsappSessions       WhatsAppSession[]
+  creditPurchases        CreditPurchase[]
 }
 
 model CreatorProfile {
@@ -278,4 +286,19 @@ model WhatsAppSession {
 
   @@index([state, lastMessageAt])
   @@index([userId])
+}
+
+model CreditPurchase {
+  id              String               @id @default(uuid())
+  userId          String
+  credits         Int
+  amount          Decimal              @db.Decimal(10, 2)
+  stripeSessionId String               @unique
+  status          CreditPurchaseStatus @default(PENDING)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }

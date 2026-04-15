@@ -2,7 +2,7 @@ import { Router, Response } from "express";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
-import { getWeeklyAICredits } from "../services/aiCredits";
+import { getAICredits } from "../services/aiCredits";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -12,8 +12,9 @@ router.use(authenticate);
 // GET /api/user/ai-credits
 router.get("/ai-credits", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const credits = await getWeeklyAICredits(prisma, req.auth!.userId);
-    res.json(credits);
+    const credits = await getAICredits(prisma, req.auth!.userId);
+    // Keep remainingCredits for backwards compat with old client code
+    res.json({ ...credits, remainingCredits: credits.totalCredits });
   } catch {
     res.status(500).json({ error: "Failed to load AI credits", code: "INTERNAL_ERROR" });
   }

@@ -272,7 +272,9 @@ STRICT RULES:
 
     res.status(201).json({
       ...record,
-      remainingCredits: creditUsage.remainingCredits,
+      remainingCredits: creditUsage.totalCredits,
+      weeklyCredits: creditUsage.weeklyCredits,
+      purchasedCredits: creditUsage.purchasedCredits,
       creditsResetWeek: creditUsage.resetWeek,
     });
   } catch (err: any) {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { Check, Download, FolderPlus, ImagePlus, Loader2, Pencil, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Check, Download, FolderPlus, ImagePlus, Loader2, Pencil, Plus, Search, Sparkles, Trash2, X, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -35,9 +36,12 @@ const backgroundOptions = [
 ];
 
 export function AIStudio() {
+  const navigate = useNavigate();
   const [images, setImages] = useState<AiStudioImage[]>([]);
   const [folders, setFolders] = useState<AiStudioFolder[]>([]);
   const [aiCredits, setAiCredits] = useState<number | null>(null);
+  const [weeklyCredits, setWeeklyCredits] = useState<number | null>(null);
+  const [purchasedCredits, setPurchasedCredits] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceProgress, setEnhanceProgress] = useState("");
@@ -78,8 +82,12 @@ export function AIStudio() {
   useEffect(() => {
     fetchFolders();
     fetchImages();
-    api.get("/user/ai-credits")
-      .then((res) => setAiCredits(res.data.remainingCredits))
+    api.get("/credits/balance")
+      .then((res) => {
+        setAiCredits(res.data.totalCredits);
+        setWeeklyCredits(res.data.weeklyCredits);
+        setPurchasedCredits(res.data.purchasedCredits);
+      })
       .catch(() => {});
   }, [fetchFolders, fetchImages]);
 
@@ -123,6 +131,8 @@ export function AIStudio() {
         newRecords.push(res.data);
         if (typeof res.data?.remainingCredits === "number") {
           setAiCredits(res.data.remainingCredits);
+          if (typeof res.data.weeklyCredits === "number") setWeeklyCredits(res.data.weeklyCredits);
+          if (typeof res.data.purchasedCredits === "number") setPurchasedCredits(res.data.purchasedCredits);
         }
         enhancedCount++;
       }
@@ -216,18 +226,43 @@ export function AIStudio() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-slate-900">AI Studio</h1>
-        <p className="text-slate-500 text-sm mt-1">{images.length} items in Media</p>
-        <p className={`text-sm mt-1 font-medium ${creditClassName}`}>
-          AI Credits: {aiCredits ?? "—"} / 50 (resets every Monday)
-        </p>
-        {aiCredits !== null && aiCredits <= 0 && (
-          <p className="text-xs text-red-600 mt-1">
-            You have exhausted your weekly AI credits. Credits will reset on Monday.
-          </p>
-        )}
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">AI Studio</h1>
+          <p className="text-slate-500 text-sm mt-1">{images.length} items in Media</p>
+        </div>
+        {/* Credits pill */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium ${
+            aiCredits === null ? "border-slate-200 bg-slate-50 text-slate-500"
+            : aiCredits <= 0 ? "border-red-200 bg-red-50 text-red-700"
+            : aiCredits <= 5 ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "border-teal-200 bg-teal-50 text-teal-700"
+          }`}>
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>{aiCredits ?? "—"} credits</span>
+            {weeklyCredits !== null && purchasedCredits !== null && (
+              <span className="text-xs opacity-70">
+                ({weeklyCredits} weekly + {purchasedCredits} purchased)
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => navigate("/billing")}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-teal-300 bg-white text-teal-700 text-sm font-medium hover:bg-teal-50 transition-colors"
+          >
+            <Wallet className="h-3.5 w-3.5" />
+            Buy Credits
+          </button>
+        </div>
       </div>
+      {aiCredits !== null && aiCredits <= 0 && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+          <span className="font-medium">Credits exhausted.</span>
+          <span>Your weekly credits reset Monday, or </span>
+          <button onClick={() => navigate("/billing")} className="underline font-medium">buy more now</button>.
+        </div>
+      )}
 
       <Card className="border-slate-200/60">
         <CardContent className="p-5">

@@ -6,3 +6,5 @@ dist/
 .DS_Store
 *.log
 .prisma/
+.claude/
+server/storage/
