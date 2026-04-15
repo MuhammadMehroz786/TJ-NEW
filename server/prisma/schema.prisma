@@ -191,6 +191,7 @@ model MarketplaceConnection {
   storeName      String
   storeUrl       String
   accessToken    String
+  refreshToken   String?
   clientId       String?
   clientSecret   String?
   tokenExpiresAt DateTime?

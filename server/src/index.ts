@@ -18,6 +18,7 @@ import marketplaceProductRoutes from "./routes/marketplace";
 import aiStudioRoutes from "./routes/aiStudio";
 import whatsappRoutes from "./routes/whatsapp";
 import creditsRoutes from "./routes/credits";
+import sallaRoutes from "./routes/salla";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,6 +47,7 @@ app.use("/api/marketplace", marketplaceProductRoutes);
 app.use("/api/ai-studio", aiStudioRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/credits", creditsRoutes);
+app.use("/api/salla", sallaRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });

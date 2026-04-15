@@ -1,9 +1,10 @@
 import { Router, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
-import { generateSallaProducts } from "../services/mockData";
 import { ShopifyService, ShopifyAuthError, ShopifyApiError } from "../services/shopify";
 import { shopifyProductToTijarflow } from "../services/shopifyMapper";
+import { SallaService, SallaAuthError, SallaApiError } from "../services/salla";
+import { sallaProductToTijarflow } from "../services/sallaMapper";
 import { encrypt } from "../lib/crypto";
 
 const router = Router();
@@ -132,26 +133,11 @@ router.post("/connect", async (req: AuthRequest, res: Response): Promise<void> =
 
       res.status(201).json(connection);
     } else {
-      // SALLA - keep existing behavior
-      const { accessToken } = req.body;
-      if (!accessToken) {
-        res.status(400).json({ error: "accessToken is required for Salla", code: "VALIDATION_ERROR" });
-        return;
-      }
-
-      const connection = await prisma.marketplaceConnection.create({
-        data: {
-          userId: req.auth!.userId,
-          platform: "SALLA",
-          storeName,
-          storeUrl,
-          accessToken,
-          status: "CONNECTED",
-        },
-        select: safeSelect,
+      // SALLA — connections are created via OAuth callback at /api/salla/callback
+      res.status(400).json({
+        error: "Salla stores must be connected via OAuth. Use the Connect with Salla button.",
+        code: "USE_OAUTH",
       });
-
-      res.status(201).json(connection);
     }
   } catch {
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
@@ -192,11 +178,54 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response): Promise<void> 
     }
 
     if (connection.platform === "SALLA") {
-      // Keep mock data for Salla
-      await prisma.product.deleteMany({ where: { marketplaceConnectionId: connection.id } });
-      const products = generateSallaProducts(connection.id, req.auth!.userId);
-      await prisma.product.createMany({ data: products });
-      res.json({ message: `Synced ${products.length} products from SALLA`, count: products.length });
+      const salla       = new SallaService(connection, prisma);
+      let totalSynced   = 0;
+      let nextCursor: string | undefined;
+      const maxProducts = Math.min(parseInt(req.query.limit as string) || 250, 1000);
+
+      do {
+        const page = await salla.fetchProducts(nextCursor);
+
+        for (const sp of page.products) {
+          const productData = sallaProductToTijarflow(sp, connection.id, req.auth!.userId);
+
+          const existing = await prisma.product.findFirst({
+            where: {
+              OR: [
+                { platformProductId: String(sp.id), marketplaceConnectionId: connection.id },
+                ...(productData.sku ? [{ sku: productData.sku, userId: req.auth!.userId }] : []),
+              ],
+            },
+          });
+
+          const updateData = {
+            title:          productData.title,
+            description:    productData.description,
+            price:          productData.price,
+            compareAtPrice: productData.compareAtPrice,
+            sku:            productData.sku,
+            quantity:       productData.quantity,
+            images:         productData.images,
+            tags:           productData.tags,
+            category:       productData.category,
+            status:         productData.status,
+            platformData:   productData.platformData,
+            marketplaceConnectionId: connection.id,
+            platformProductId:       String(sp.id),
+          };
+
+          if (existing) {
+            await prisma.product.update({ where: { id: existing.id }, data: updateData });
+          } else {
+            await prisma.product.create({ data: productData });
+          }
+          totalSynced++;
+        }
+
+        nextCursor = page.nextCursor;
+      } while (nextCursor && totalSynced < maxProducts);
+
+      res.json({ message: `Synced ${totalSynced} products from Salla`, count: totalSynced });
       return;
     }
 
@@ -268,6 +297,14 @@ router.post("/:id/sync", async (req: AuthRequest, res: Response): Promise<void> 
       res.status(400).json({ error: err.message, code: "SHOPIFY_AUTH_ERROR" });
     } else if (err instanceof ShopifyApiError) {
       res.status(502).json({ error: err.message, code: "SHOPIFY_API_ERROR" });
+    } else if (err instanceof SallaAuthError) {
+      await prisma.marketplaceConnection.update({
+        where: { id: req.params.id as string },
+        data: { status: "DISCONNECTED" },
+      });
+      res.status(400).json({ error: err.message, code: "SALLA_AUTH_ERROR" });
+    } else if (err instanceof SallaApiError) {
+      res.status(502).json({ error: err.message, code: "SALLA_API_ERROR" });
     } else {
       console.error("Sync error:", err);
       res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
