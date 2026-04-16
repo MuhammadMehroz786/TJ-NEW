@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Store, Link2, Unlink, RefreshCw, ShoppingBag, BookOpen, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -49,7 +49,6 @@ const marketplaces = [
 
 export function Marketplaces() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -59,7 +58,6 @@ export function Marketplaces() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [saving, setSaving] = useState(false);
-  const [sallaConnecting, setSallaConnecting] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
 
   const fetchConnections = () => {
@@ -70,23 +68,6 @@ export function Marketplaces() {
       .finally(() => setLoading(false));
   };
 
-  // Handle redirect back from Salla OAuth
-  useEffect(() => {
-    const sallaParam = searchParams.get("salla");
-    if (sallaParam === "connected") {
-      toast.success("Salla store connected successfully!");
-      fetchConnections();
-      setSearchParams({}, { replace: true });
-    } else if (sallaParam === "denied") {
-      toast.error("Salla authorization was cancelled");
-      setSearchParams({}, { replace: true });
-    } else if (sallaParam === "error") {
-      const reason = searchParams.get("reason") || "unknown";
-      toast.error(`Failed to connect Salla store (${reason})`);
-      setSearchParams({}, { replace: true });
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     fetchConnections();
   }, []);
@@ -95,10 +76,6 @@ export function Marketplaces() {
     connections.filter((c) => c.platform === platform);
 
   const openConnect = (platform: string) => {
-    if (platform === "SALLA") {
-      handleSallaOAuth();
-      return;
-    }
     setConnectingPlatform(platform);
     setStoreName("");
     setStoreUrl("");
@@ -107,31 +84,18 @@ export function Marketplaces() {
     setDialogOpen(true);
   };
 
-  const handleSallaOAuth = async () => {
-    setSallaConnecting(true);
-    try {
-      const res = await api.get("/salla/auth");
-      // Redirect the browser to Salla's OAuth authorization page
-      window.location.href = res.data.url;
-    } catch {
-      toast.error("Failed to start Salla authorization");
-      setSallaConnecting(false);
-    }
-  };
-
   const handleConnect = async (e: FormEvent) => {
     e.preventDefault();
-    if (connectingPlatform !== "SHOPIFY") return;
     setSaving(true);
     try {
       await api.post("/marketplaces/connect", {
-        platform: "SHOPIFY",
+        platform: connectingPlatform,
         storeName,
         storeUrl,
         clientId,
         clientSecret,
       });
-      toast.success("Shopify store connected!");
+      toast.success(`${connectingPlatform === "SALLA" ? "Salla" : "Shopify"} store connected!`);
       setDialogOpen(false);
       fetchConnections();
     } catch (err: unknown) {
@@ -213,31 +177,14 @@ export function Marketplaces() {
                       Setup Guide
                     </Button>
                   )}
-                  {mp.platform === "SALLA" ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleSallaOAuth}
-                      disabled={sallaConnecting}
-                      className={`${mp.textColor} ${mp.borderColor} hover:${mp.bgLight}`}
-                    >
-                      {sallaConnecting ? (
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Link2 className="h-4 w-4" />
-                      )}
-                      <span className="ml-1">{sallaConnecting ? "Redirecting..." : "Connect with Salla"}</span>
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openConnect(mp.platform)}
-                      className={`${mp.textColor} ${mp.borderColor} hover:${mp.bgLight}`}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openConnect(mp.platform)}
+                    className={`${mp.textColor} ${mp.borderColor} hover:${mp.bgLight}`}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
 
@@ -248,13 +195,12 @@ export function Marketplaces() {
                     <CardContent className="p-5 flex flex-col items-center justify-center min-h-[120px]">
                       <p className="text-sm text-slate-400 mb-3">No stores connected yet</p>
                       <Button
-                        onClick={() => mp.platform === "SALLA" ? handleSallaOAuth() : openConnect(mp.platform)}
-                        disabled={mp.platform === "SALLA" && sallaConnecting}
+                        onClick={() => openConnect(mp.platform)}
                         className="bg-teal-600 hover:bg-teal-700 text-white"
                         size="sm"
                       >
                         <Link2 className="h-3.5 w-3.5 mr-1.5" />
-                        {mp.platform === "SALLA" && sallaConnecting ? "Redirecting..." : `Connect ${mp.name}`}
+                        Connect {mp.name}
                       </Button>
                     </CardContent>
                   </Card>
@@ -342,26 +288,28 @@ export function Marketplaces() {
               />
             </div>
             <div className="space-y-2">
-              <Label>API Key (Client ID)</Label>
+              <Label>Client ID</Label>
               <Input
-                placeholder="96237c1c6ec5f21d653a..."
+                placeholder={connectingPlatform === "SHOPIFY" ? "96237c1c6ec5f21d653a..." : "Enter your Salla Client ID"}
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label>API Secret Key (Client Secret)</Label>
+              <Label>Client Secret</Label>
               <Input
                 type="password"
-                placeholder="shpss_xxxxxxxxxxxxxxxxxxxxx"
+                placeholder={connectingPlatform === "SHOPIFY" ? "shpss_xxxxxxxxxxxxxxxxxxxxx" : "Enter your Salla Client Secret"}
                 value={clientSecret}
                 onChange={(e) => setClientSecret(e.target.value)}
                 required
               />
             </div>
             <p className="text-xs text-slate-500">
-              Find these in Shopify Admin &rarr; Settings &rarr; Apps &rarr; Develop apps &rarr; Your app &rarr; API credentials
+              {connectingPlatform === "SALLA"
+                ? "Find these in Salla Partner Portal → Apps → Your App → OAuth2 Credentials"
+                : "Find these in Shopify Admin → Settings → Apps → Develop apps → Your app → API credentials"}
             </p>
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>

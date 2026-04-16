@@ -1,9 +1,6 @@
 import { PrismaClient, MarketplaceConnection } from "@prisma/client";
 import { encrypt, decrypt } from "../lib/crypto";
 
-// Prisma client not yet regenerated after adding refreshToken column — extend locally
-type SallaConnection = MarketplaceConnection & { refreshToken?: string | null };
-
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface SallaPrice {
@@ -54,14 +51,6 @@ export interface SallaProductsPage {
   nextCursor?: string;
 }
 
-export interface SallaTokenResponse {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-  expires_in: number;
-  scope: string;
-}
-
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 export class SallaAuthError extends Error {
@@ -84,60 +73,19 @@ export class SallaApiError extends Error {
   }
 }
 
-// ── OAuth Helpers (static — no connection needed) ────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const SALLA_TOKEN_URL = "https://accounts.salla.sa/oauth2/token";
-const SALLA_AUTH_URL  = "https://accounts.salla.sa/oauth2/auth";
 const SALLA_API_BASE  = "https://api.salla.dev/admin/v2";
-
-export function getSallaAuthUrl(state: string): string {
-  const clientId    = process.env.SALLA_CLIENT_ID!;
-  const redirectUri = process.env.SALLA_REDIRECT_URI!;
-
-  const params = new URLSearchParams({
-    client_id:     clientId,
-    redirect_uri:  redirectUri,
-    response_type: "code",
-    scope:         "offline_access products.read products.write",
-    state,
-  });
-
-  return `${SALLA_AUTH_URL}?${params.toString()}`;
-}
-
-export async function exchangeSallaCode(code: string): Promise<SallaTokenResponse> {
-  const clientId     = process.env.SALLA_CLIENT_ID!;
-  const clientSecret = process.env.SALLA_CLIENT_SECRET!;
-  const redirectUri  = process.env.SALLA_REDIRECT_URI!;
-
-  const res = await fetch(SALLA_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type:    "authorization_code",
-      code,
-      client_id:     clientId,
-      client_secret: clientSecret,
-      redirect_uri:  redirectUri,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new SallaAuthError(`Code exchange failed (${res.status}): ${body}`);
-  }
-
-  return res.json() as Promise<SallaTokenResponse>;
-}
 
 // ── Service (per-connection instance) ────────────────────────────────────────
 
 export class SallaService {
-  private connection: SallaConnection;
+  private connection: MarketplaceConnection;
   private prisma: PrismaClient;
 
   constructor(connection: MarketplaceConnection, prisma: PrismaClient) {
-    this.connection = connection as SallaConnection;
+    this.connection = connection;
     this.prisma = prisma;
   }
 
@@ -146,7 +94,7 @@ export class SallaService {
     const fresh = await this.prisma.marketplaceConnection.findUnique({
       where: { id: this.connection.id },
     });
-    if (fresh) this.connection = fresh as SallaConnection;
+    if (fresh) this.connection = fresh;
 
     const expiresAt = this.connection.tokenExpiresAt;
     const bufferMs  = 5 * 60 * 1000; // 5-minute buffer
@@ -164,23 +112,22 @@ export class SallaService {
   }
 
   async refreshToken(): Promise<string> {
-    const storedRefresh = this.connection.refreshToken;
-    if (!storedRefresh) {
-      throw new SallaAuthError("No refresh token stored — re-authorize the store");
-    }
+    // Use the merchant's own client credentials (stored per-connection) to get a fresh token
+    const clientId     = this.connection.clientId;
+    const clientSecret = this.connection.clientSecret ? decrypt(this.connection.clientSecret) : null;
 
-    const refreshTokenPlain = decrypt(storedRefresh);
-    const clientId          = process.env.SALLA_CLIENT_ID!;
-    const clientSecret      = process.env.SALLA_CLIENT_SECRET!;
+    if (!clientId || !clientSecret) {
+      throw new SallaAuthError("No client credentials stored — re-connect the store");
+    }
 
     const res = await fetch(SALLA_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        grant_type:    "refresh_token",
-        refresh_token: refreshTokenPlain,
+        grant_type:    "client_credentials",
         client_id:     clientId,
         client_secret: clientSecret,
+        scope:         "offline_access products.read products.write",
       }),
     });
 
@@ -189,23 +136,15 @@ export class SallaService {
       throw new SallaAuthError(`Token refresh failed (${res.status}): ${body}`);
     }
 
-    const data = (await res.json()) as SallaTokenResponse;
-    const tokenExpiresAt = new Date(Date.now() + data.expires_in * 1000);
+    const data = (await res.json()) as { access_token: string; expires_in: number; token_type: string };
+    const tokenExpiresAt = new Date(Date.now() + (data.expires_in ?? 3600) * 1000);
 
-    // Persist updated tokens — use raw query because refreshToken column may not
-    // be in generated Prisma client yet (run `prisma generate` after server restart)
-    await this.prisma.$executeRawUnsafe(
-      `UPDATE "MarketplaceConnection"
-       SET "accessToken" = $1, "refreshToken" = $2, "tokenExpiresAt" = $3, "updatedAt" = NOW()
-       WHERE id = $4`,
-      encrypt(data.access_token),
-      encrypt(data.refresh_token),
-      tokenExpiresAt,
-      this.connection.id,
-    );
+    await this.prisma.marketplaceConnection.update({
+      where: { id: this.connection.id },
+      data: { accessToken: encrypt(data.access_token), tokenExpiresAt },
+    });
 
     this.connection.accessToken    = encrypt(data.access_token);
-    this.connection.refreshToken   = encrypt(data.refresh_token);
     this.connection.tokenExpiresAt = tokenExpiresAt;
 
     return data.access_token;

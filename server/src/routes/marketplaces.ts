@@ -133,11 +133,89 @@ router.post("/connect", async (req: AuthRequest, res: Response): Promise<void> =
 
       res.status(201).json(connection);
     } else {
-      // SALLA — connections are created via OAuth callback at /api/salla/callback
-      res.status(400).json({
-        error: "Salla stores must be connected via OAuth. Use the Connect with Salla button.",
-        code: "USE_OAUTH",
+      // SALLA — use client_credentials grant with merchant's own Client ID + Secret
+      const { clientId, clientSecret } = req.body;
+
+      if (!clientId || !clientSecret) {
+        res.status(400).json({ error: "clientId and clientSecret are required for Salla", code: "VALIDATION_ERROR" });
+        return;
+      }
+
+      // Exchange credentials for access token to validate them
+      let accessToken: string;
+      let expiresIn: number;
+      try {
+        const tokenRes = await fetch("https://accounts.salla.sa/oauth2/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type:    "client_credentials",
+            client_id:     clientId,
+            client_secret: clientSecret,
+            scope:         "offline_access products.read products.write",
+          }),
+        });
+
+        if (!tokenRes.ok) {
+          res.status(400).json({
+            error: "Invalid Salla credentials — check your Client ID and Secret",
+            code: "SALLA_AUTH_ERROR",
+          });
+          return;
+        }
+
+        const tokenData = (await tokenRes.json()) as { access_token: string; expires_in: number };
+        accessToken = tokenData.access_token;
+        expiresIn   = tokenData.expires_in ?? 3600;
+      } catch {
+        res.status(400).json({
+          error: "Could not reach Salla — check your credentials",
+          code: "SALLA_AUTH_ERROR",
+        });
+        return;
+      }
+
+      // Try to auto-fill store name/url from Salla API
+      let finalStoreName = storeName;
+      let finalStoreUrl  = storeUrl;
+      try {
+        const storeRes = await fetch("https://api.salla.dev/admin/v2/store/info", {
+          headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+        });
+        if (storeRes.ok) {
+          const storeBody = (await storeRes.json()) as { data?: { name?: string; domain?: string; url?: string } };
+          if (storeBody.data?.name) finalStoreName = storeBody.data.name;
+          if (storeBody.data?.domain ?? storeBody.data?.url) {
+            finalStoreUrl = storeBody.data.domain ?? storeBody.data.url ?? storeUrl;
+          }
+        }
+      } catch { /* use provided values */ }
+
+      // Check for duplicate after resolving final storeUrl
+      const sallaExisting = await prisma.marketplaceConnection.findUnique({
+        where: { userId_storeUrl: { userId: req.auth!.userId, storeUrl: finalStoreUrl } },
       });
+      if (sallaExisting) {
+        res.status(409).json({ error: "This Salla store is already connected", code: "CONFLICT" });
+        return;
+      }
+
+      const connection = await prisma.marketplaceConnection.create({
+        data: {
+          userId:          req.auth!.userId,
+          platform:        "SALLA",
+          storeName:       finalStoreName,
+          storeUrl:        finalStoreUrl,
+          accessToken:     encrypt(accessToken),
+          clientId,
+          clientSecret:    encrypt(clientSecret),
+          tokenExpiresAt:  new Date(Date.now() + expiresIn * 1000),
+          status:          "CONNECTED",
+        },
+        select: safeSelect,
+      });
+
+      res.status(201).json(connection);
     }
   } catch {
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
