@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { GoogleGenAI } from "@google/genai";
-import { AICreditError, consumeWeeklyAICredit } from "../services/aiCredits";
+import { AICreditError, consumeWeeklyAICredit, getAICredits } from "../services/aiCredits";
 import {
   downloadWhatsAppMedia,
   extractIncomingMessages,
@@ -19,6 +19,11 @@ const SIGNUP_URL = process.env.WHATSAPP_SIGNUP_URL || "https://tijarflow.com/sig
 
 function normalizeAnswer(content: string | undefined, interactiveTitle: string | undefined): string {
   return String(interactiveTitle || content || "").trim().toLowerCase();
+}
+
+/** Returns true if the user is trying to restart the conversation */
+function isRestartTrigger(answer: string): boolean {
+  return ["hi", "hello", "start", "restart", "menu", "help", "مرحبا", "أهلا"].includes(answer);
 }
 
 const STUDIO_SCENE =
@@ -81,6 +86,17 @@ async function sendEnhancedImage(to: string, base64: string, mimeType: string): 
   await sendWhatsAppImageById({ to, mediaId });
 }
 
+async function sendWelcomeMessage(to: string): Promise<void> {
+  await sendWhatsAppButtonsMessage({
+    to,
+    body: "Welcome to TijarFlow AI Assistant! 🛍️\n\nSend us your product photos and we'll enhance them with a professional studio background.\n\nAre you already registered on TijarFlow as a merchant?",
+    buttons: [
+      { id: "registered_yes", title: "Yes, I'm registered" },
+      { id: "registered_no", title: "No, use free trial" },
+    ],
+  });
+}
+
 // Meta webhook verification
 router.get("/webhook", (req: Request, res: Response): void => {
   const mode = req.query["hub.mode"];
@@ -107,10 +123,13 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     for (const message of messages) {
       const from = normalizePhoneNumber(message.from);
       const now = new Date();
+      const answer = normalizeAnswer(message.text, message.interactiveReplyTitle);
+
       let session = await prisma.whatsAppSession.findUnique({
         where: { phoneNumber: from },
       });
 
+      // Brand-new user
       if (!session) {
         session = await prisma.whatsAppSession.create({
           data: {
@@ -119,14 +138,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             lastMessageAt: now,
           },
         });
-        await sendWhatsAppButtonsMessage({
-          to: from,
-          body: "Welcome to TijarFlow AI Assistant. Are you already registered on TijarFlow as a merchant?",
-          buttons: [
-            { id: "registered_yes", title: "Yes" },
-            { id: "registered_no", title: "No" },
-          ],
-        });
+        await sendWelcomeMessage(from);
         continue;
       }
 
@@ -135,11 +147,30 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         data: { lastMessageAt: now },
       });
 
+      // --- Global restart trigger (except verified users — they have a working session) ---
+      if (
+        !session.isVerified &&
+        session.state !== "verified" &&
+        isRestartTrigger(answer)
+      ) {
+        await prisma.whatsAppSession.update({
+          where: { id: session.id },
+          data: {
+            state: "awaiting_account_answer",
+            emailAttempts: 0,
+            creditsUsed: session.isVerified ? session.creditsUsed : 0,
+          },
+        });
+        await sendWelcomeMessage(from);
+        continue;
+      }
+
+      // --- Verified / linked merchant ---
       if (session.isVerified || session.state === "verified") {
         if (message.type === "image" && message.imageId) {
           await sendWhatsAppTextMessage({
             to: from,
-            body: "Enhancing your product image... please wait a moment.",
+            body: "✨ Enhancing your product image... please wait a moment.",
           });
           try {
             if (session.userId) {
@@ -148,15 +179,23 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             const media = await downloadWhatsAppMedia(message.imageId);
             const enhanced = await enhanceProductImage(media.base64, media.mimeType);
             await sendEnhancedImage(from, enhanced.base64, enhanced.mimeType);
-            await sendWhatsAppTextMessage({
-              to: from,
-              body: "Your enhanced product image is ready! Send another image anytime.",
-            });
+
+            // Show remaining credits after enhancement
+            let creditMsg = "Your enhanced product image is ready! Send another image anytime.";
+            if (session.userId) {
+              try {
+                const credits = await getAICredits(prisma, session.userId);
+                creditMsg = `✅ Done! Credits remaining this week: ${credits.weeklyCredits}${credits.purchasedCredits > 0 ? ` + ${credits.purchasedCredits} purchased` : ""}. Send another image anytime.`;
+              } catch {
+                // non-critical, use default message
+              }
+            }
+            await sendWhatsAppTextMessage({ to: from, body: creditMsg });
           } catch (err: any) {
             if (err instanceof AICreditError) {
               await sendWhatsAppTextMessage({
                 to: from,
-                body: `You have used all your weekly AI credits. They reset every Monday. Visit ${SIGNUP_URL} to manage your account.`,
+                body: `⚠️ You've used all your AI credits for this week. They reset every Monday.\n\nVisit ${SIGNUP_URL} to purchase more credits.`,
               });
             } else {
               console.error("WhatsApp verified enhancement error:", err);
@@ -166,52 +205,59 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
               });
             }
           }
+        } else if (answer === "credits" || answer === "balance") {
+          if (session.userId) {
+            try {
+              const credits = await getAICredits(prisma, session.userId);
+              await sendWhatsAppTextMessage({
+                to: from,
+                body: `💳 Your credit balance:\n• Weekly credits: ${credits.weeklyCredits} (resets Monday)\n• Purchased credits: ${credits.purchasedCredits}\n• Total: ${credits.totalCredits}\n\nSend a product image to use them!`,
+              });
+            } catch {
+              await sendWhatsAppTextMessage({ to: from, body: "Could not fetch your credit balance. Please try again." });
+            }
+          }
         } else {
           await sendWhatsAppTextMessage({
             to: from,
-            body: "You are verified. Please send a product image to enhance.",
+            body: "✅ You're verified and ready to go!\n\nSend a product image and we'll give it a professional studio background.\n\nType *credits* to check your balance.",
           });
         }
         continue;
       }
 
+      // --- Awaiting yes/no: are you a registered merchant? ---
       if (session.state === "awaiting_account_answer" || session.state === "idle") {
-        const answer = normalizeAnswer(message.text, message.interactiveReplyTitle);
-        if (answer === "yes") {
+        if (answer === "yes" || answer === "yes, i'm registered") {
           await prisma.whatsAppSession.update({
             where: { id: session.id },
             data: { state: "awaiting_email", emailAttempts: 0 },
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body: "Please enter your registered TijarFlow merchant email.",
+            body: "Please enter the email address you used to register on TijarFlow.",
           });
           continue;
         }
 
-        if (answer === "no") {
+        if (answer === "no" || answer === "no, use free trial") {
           await prisma.whatsAppSession.update({
             where: { id: session.id },
-            data: { state: "guest_active", creditsUsed: 0, isVerified: false, userId: null },
+            data: { state: "guest_active", creditsUsed: 0, creditsLimit: 5, isVerified: false, userId: null },
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body: "Great. You can use 5 free AI enhancements. Send your first product image now.",
+            body: "Great! You have *5 free AI enhancements* to try.\n\nSend your first product image now and we'll give it a professional studio background! 🎨",
           });
           continue;
         }
 
-        await sendWhatsAppButtonsMessage({
-          to: from,
-          body: "Are you registered on TijarFlow as a merchant?",
-          buttons: [
-            { id: "registered_yes", title: "Yes" },
-            { id: "registered_no", title: "No" },
-          ],
-        });
+        // Unclear input — re-send buttons
+        await sendWelcomeMessage(from);
         continue;
       }
 
+      // --- Awaiting email verification ---
       if (session.state === "awaiting_email") {
         if (message.type !== "text" || !message.text) {
           await sendWhatsAppTextMessage({
@@ -232,9 +278,18 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             where: { id: session.id },
             data: { userId: user.id, isVerified: true, state: "verified", emailAttempts: 0 },
           });
+
+          let creditsInfo = "";
+          try {
+            const credits = await getAICredits(prisma, user.id);
+            creditsInfo = `\n\n💳 Credits this week: ${credits.weeklyCredits}${credits.purchasedCredits > 0 ? ` + ${credits.purchasedCredits} purchased` : ""}.`;
+          } catch {
+            // non-critical
+          }
+
           await sendWhatsAppTextMessage({
             to: from,
-            body: `Linked successfully, ${user.name}. You now have full access. Send a product image to continue.`,
+            body: `✅ Welcome back, ${user.name}! Your account is now linked.${creditsInfo}\n\nSend a product image to enhance it!`,
           });
           continue;
         }
@@ -247,7 +302,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body: "We could not verify that email after 3 attempts. Reply hi to start again.",
+            body: "We could not find a merchant account with that email after 3 attempts.\n\nReply *hi* to start over or visit " + SIGNUP_URL + " to create an account.",
           });
           continue;
         }
@@ -258,12 +313,26 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         });
         await sendWhatsAppTextMessage({
           to: from,
-          body: `Email not found for a merchant account. Attempts left: ${3 - attempts}. Please try again.`,
+          body: `❌ No merchant account found for that email. ${3 - attempts} attempt${3 - attempts === 1 ? "" : "s"} remaining.\n\nPlease try a different email address.`,
         });
         continue;
       }
 
+      // --- Guest: active or exhausted ---
       if (session.state === "guest_active" || session.state === "exhausted") {
+        // Allow exhausted/guest users to link a merchant account
+        if (answer === "register" || answer === "link" || answer === "login" || answer === "yes, i'm registered") {
+          await prisma.whatsAppSession.update({
+            where: { id: session.id },
+            data: { state: "awaiting_email", emailAttempts: 0 },
+          });
+          await sendWhatsAppTextMessage({
+            to: from,
+            body: "Please enter the email address you used to register on TijarFlow.",
+          });
+          continue;
+        }
+
         const creditsRemaining = Math.max(0, session.creditsLimit - session.creditsUsed);
 
         if (creditsRemaining <= 0) {
@@ -273,7 +342,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body: `Your free credits are finished. Sign up for full access: ${SIGNUP_URL}`,
+            body: `Your 5 free enhancements are used up! 🎉\n\nSign up for TijarFlow to get 50 AI credits every week:\n${SIGNUP_URL}\n\nAlready have an account? Reply *register* to link it.`,
           });
           continue;
         }
@@ -281,7 +350,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         if (message.type !== "image") {
           await sendWhatsAppTextMessage({
             to: from,
-            body: `You have ${creditsRemaining} free enhancement credits left. Please send a product image.`,
+            body: `You have *${creditsRemaining}* free enhancement${creditsRemaining === 1 ? "" : "s"} remaining.\n\nSend a product image to use one! 📸\n\nAlready on TijarFlow? Reply *register* to link your account and get 50 weekly credits.`,
           });
           continue;
         }
@@ -300,27 +369,47 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
         await sendWhatsAppTextMessage({
           to: from,
-          body: "Enhancing your product image... please wait a moment.",
+          body: "✨ Enhancing your product image... please wait a moment.",
         });
+
+        let enhancementOk = false;
         try {
           const media = await downloadWhatsAppMedia(message.imageId!);
           const enhanced = await enhanceProductImage(media.base64, media.mimeType);
           await sendEnhancedImage(from, enhanced.base64, enhanced.mimeType);
+          enhancementOk = true;
         } catch (err) {
           console.error("WhatsApp guest enhancement error:", err);
+          // Refund the credit on failure
+          await prisma.whatsAppSession.update({
+            where: { id: session.id },
+            data: { creditsUsed: { decrement: 1 }, state: "guest_active" },
+          });
           await sendWhatsAppTextMessage({
             to: from,
             body: "Sorry, we could not enhance your image right now. Please try again.",
           });
+          continue;
         }
 
-        const nudge =
-          remainingAfter === 0
-            ? `You have used your final free credit. Sign up for unlimited access: ${SIGNUP_URL}`
-            : remainingAfter <= 2
-              ? `Credits left: ${remainingAfter}. Upgrade anytime for unlimited access: ${SIGNUP_URL}`
-              : `Credits left: ${remainingAfter}.`;
-        await sendWhatsAppTextMessage({ to: from, body: nudge });
+        if (enhancementOk) {
+          if (remainingAfter === 0) {
+            await sendWhatsAppTextMessage({
+              to: from,
+              body: `✅ Done! That was your last free enhancement.\n\nSign up for unlimited weekly credits:\n${SIGNUP_URL}\n\nAlready have an account? Reply *register* to link it.`,
+            });
+          } else if (remainingAfter <= 2) {
+            await sendWhatsAppTextMessage({
+              to: from,
+              body: `✅ Done! You have *${remainingAfter}* free enhancement${remainingAfter === 1 ? "" : "s"} left.\n\nUpgrade anytime: ${SIGNUP_URL}`,
+            });
+          } else {
+            await sendWhatsAppTextMessage({
+              to: from,
+              body: `✅ Done! Credits remaining: *${remainingAfter}*. Send another image anytime!`,
+            });
+          }
+        }
         continue;
       }
     }
