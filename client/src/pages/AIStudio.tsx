@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import api from "@/lib/api";
+import { startEnhanceJob, startRefineJob, subscribeToResults } from "@/lib/aiStudioJobs";
+import { AiStudioJobsPill } from "@/components/AiStudioJobsPill";
 
 interface AiStudioImage {
   id: string;
@@ -43,8 +45,6 @@ export function AIStudio() {
   const [weeklyCredits, setWeeklyCredits] = useState<number | null>(null);
   const [purchasedCredits, setPurchasedCredits] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [enhancing, setEnhancing] = useState(false);
-  const [enhanceProgress, setEnhanceProgress] = useState("");
   const [dragging, setDragging] = useState(false);
   const [background, setBackground] = useState("studio");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
@@ -57,7 +57,6 @@ export function AIStudio() {
   const [newlyEnhanced, setNewlyEnhanced] = useState<AiStudioImage | null>(null);
   const [savingEnhanceFolder, setSavingEnhanceFolder] = useState("none");
   const [refineInstruction, setRefineInstruction] = useState("");
-  const [refining, setRefining] = useState(false);
   const [refineHistory, setRefineHistory] = useState<AiStudioImage[]>([]);
   const [undoing, setUndoing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -87,6 +86,37 @@ export function AIStudio() {
       .catch(() => {});
   }, [fetchFolders, fetchImages]);
 
+  // Listen for background enhance/refine results → update gallery + credits
+  useEffect(() => {
+    return subscribeToResults((r) => {
+      if (r.type === "error") {
+        toast.error(r.error);
+        return;
+      }
+      const refined = r.result;
+      setImages((prev) => [refined, ...prev.filter((img) => img.id !== refined.id)]);
+      if (typeof r.remainingCredits === "number") setAiCredits(r.remainingCredits);
+      if (typeof r.weeklyCredits === "number") setWeeklyCredits(r.weeklyCredits);
+      if (typeof r.purchasedCredits === "number") setPurchasedCredits(r.purchasedCredits);
+      fetchFolders();
+
+      if (r.job.type === "refine" && r.refineSourceImageId) {
+        // If preview dialog is open on the source image, swap to the refined version
+        setPreviewImage((current) => {
+          if (!current) return current;
+          if (current.id === r.refineSourceImageId) {
+            setRefineHistory((hist) => [...hist, current]);
+            return refined;
+          }
+          return current;
+        });
+        toast.success("Refinement ready");
+      } else {
+        toast.success(r.job.type === "enhance" ? "Enhancement ready" : "Done");
+      }
+    });
+  }, [fetchFolders]);
+
   const handleFileSelect = (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
     const fileArray = Array.from(files).filter((file) => file.type.startsWith("image/"));
@@ -111,73 +141,35 @@ export function AIStudio() {
     if (e.dataTransfer.files?.length) handleFileSelect(e.dataTransfer.files);
   };
 
-  const handleEnhance = async () => {
+  const handleEnhance = () => {
     if (selectedImages.length === 0) return toast.error("Please upload image(s) first");
-    setEnhancing(true);
-    let enhancedCount = 0;
-    const newRecords: AiStudioImage[] = [];
-    try {
-      for (let i = 0; i < selectedImages.length; i++) {
-        setEnhanceProgress(`Enhancing image ${i + 1} of ${selectedImages.length}...`);
-        const res = await api.post("/ai-studio/enhance", {
-          image: selectedImages[i],
-          background,
-          folderId: selectedFolderId === "all" ? null : selectedFolderId,
-        }, { timeout: 120000 });
-        newRecords.push(res.data);
-        if (typeof res.data?.remainingCredits === "number") {
-          setAiCredits(res.data.remainingCredits);
-          if (typeof res.data.weeklyCredits === "number") setWeeklyCredits(res.data.weeklyCredits);
-          if (typeof res.data.purchasedCredits === "number") setPurchasedCredits(res.data.purchasedCredits);
-        }
-        enhancedCount++;
-      }
-      setImages((prev) => [...newRecords, ...prev]);
-      setSelectedImages([]);
-      setNewlyEnhanced(newRecords[0] || null);
-      setSavingEnhanceFolder(newRecords[0]?.folder?.id || "none");
-      fetchFolders();
-      toast.success(`${enhancedCount} image(s) enhanced and saved`);
-    } catch (err: unknown) {
-      if (newRecords.length > 0) {
-        setImages((prev) => [...newRecords, ...prev]);
-        setSelectedImages((prev) => prev.slice(newRecords.length));
-      }
-      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Enhancement failed");
-    } finally {
-      setEnhancing(false);
-      setEnhanceProgress("");
+    const images = selectedImages;
+    const folderId = selectedFolderId === "all" ? null : selectedFolderId;
+    const count = images.length;
+
+    for (let i = 0; i < images.length; i++) {
+      startEnhanceJob({
+        image: images[i],
+        background,
+        folderId,
+        label: count > 1 ? `Enhancing ${i + 1} of ${count}` : "Enhancing image",
+      });
     }
+    setSelectedImages([]);
+    toast.info(count === 1 ? "Enhancement started — you can keep working" : `Enhancing ${count} images in the background`);
   };
 
-  const handleRefine = async (instruction: string) => {
+  const handleRefine = (instruction: string) => {
     if (!previewImage) return;
     const trimmed = instruction.trim();
     if (trimmed.length < 3) return toast.error("Describe the refinement in at least 3 characters");
-    setRefining(true);
-    const previous = previewImage;
-    try {
-      const res = await api.post("/ai-studio/refine", {
-        imageId: previewImage.id,
-        instruction: trimmed,
-      }, { timeout: 120000 });
-      const refined: AiStudioImage = res.data;
-      setImages((prev) => [refined, ...prev]);
-      setRefineHistory((prev) => [...prev, previous]);
-      setPreviewImage(refined);
-      setRefineInstruction("");
-      if (typeof res.data?.remainingCredits === "number") {
-        setAiCredits(res.data.remainingCredits);
-        if (typeof res.data.weeklyCredits === "number") setWeeklyCredits(res.data.weeklyCredits);
-        if (typeof res.data.purchasedCredits === "number") setPurchasedCredits(res.data.purchasedCredits);
-      }
-      fetchFolders();
-      toast.success("Refinement applied");
-    } catch (err: unknown) {
-      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Refinement failed");
-    } finally {
-      setRefining(false);
-    }
+    startRefineJob({
+      imageId: previewImage.id,
+      instruction: trimmed,
+      label: "Refining image",
+    });
+    setRefineInstruction("");
+    toast.info("Refining in the background — you can close this dialog");
   };
 
   const handleUndoRefine = async () => {
@@ -270,6 +262,7 @@ export function AIStudio() {
 
   return (
     <div>
+      <AiStudioJobsPill />
       <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">AI Studio</h1>
@@ -373,8 +366,8 @@ export function AIStudio() {
                     {folders.map((folder) => <SelectItem key={folder.id} value={folder.id}>{folder.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
-                <Button onClick={handleEnhance} disabled={enhancing || selectedImages.length === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
-                  {enhancing ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{enhanceProgress || "Enhancing..."}</> : <><Sparkles className="h-4 w-4 mr-2" />Enhance All & Save</>}
+                <Button onClick={handleEnhance} disabled={selectedImages.length === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
+                  <Sparkles className="h-4 w-4 mr-2" />Enhance All & Save
                 </Button>
               </div>
 
@@ -451,7 +444,7 @@ export function AIStudio() {
                         variant="outline"
                         size="sm"
                         onClick={handleUndoRefine}
-                        disabled={undoing || refining}
+                        disabled={undoing}
                         className="h-7 px-2.5 text-xs"
                       >
                         {undoing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
@@ -471,9 +464,8 @@ export function AIStudio() {
                     <button
                       key={chip.label}
                       type="button"
-                      disabled={refining}
                       onClick={() => handleRefine(chip.value)}
-                      className="text-xs px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 disabled:opacity-50"
+                      className="text-xs px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700"
                     >
                       {chip.label}
                     </button>
@@ -484,17 +476,16 @@ export function AIStudio() {
                     placeholder="e.g. crop tighter, add soft shadows, change to outdoor scene..."
                     value={refineInstruction}
                     onChange={(e) => setRefineInstruction(e.target.value)}
-                    disabled={refining}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !refining) handleRefine(refineInstruction);
+                      if (e.key === "Enter") handleRefine(refineInstruction);
                     }}
                   />
                   <Button
                     onClick={() => handleRefine(refineInstruction)}
-                    disabled={refining || refineInstruction.trim().length < 3}
+                    disabled={refineInstruction.trim().length < 3}
                     className="bg-teal-600 hover:bg-teal-700 text-white whitespace-nowrap"
                   >
-                    {refining ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Refining...</> : <><Sparkles className="h-4 w-4 mr-2" />Refine</>}
+                    <Sparkles className="h-4 w-4 mr-2" />Refine
                   </Button>
                 </div>
               </div>
