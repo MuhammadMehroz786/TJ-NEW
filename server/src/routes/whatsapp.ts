@@ -159,13 +159,31 @@ const QUICK_REFINEMENTS: Record<string, string> = {
   refine_light: "Make the lighting softer and more diffused — add a gentle key light with feathered edges and cleaner soft shadows beneath the product. Do NOT increase overall brightness, do NOT wash out the image, and do NOT reduce contrast. Preserve the existing exposure and color saturation.",
 };
 
-async function resetSessionToWelcome(sessionId: string, keepCredits: boolean, currentCreditsUsed: number): Promise<void> {
+/**
+ * Reset a session back to the welcome state.
+ *   keepCredits  — preserve guest creditsUsed (prevents farming via /start)
+ *   preserveLink — keep the merchant link (userId + isVerified). /start should
+ *                  NOT unlink — only /logout does that.
+ */
+async function resetSessionToWelcome(
+  sessionId: string,
+  keepCredits: boolean,
+  currentCreditsUsed: number,
+  preserveLink: boolean = false,
+  currentUserId: string | null = null,
+  currentIsVerified: boolean = false,
+): Promise<void> {
+  const linkData = preserveLink
+    ? { userId: currentUserId, isVerified: currentIsVerified }
+    : { userId: null, isVerified: false };
+
   await prisma.whatsAppSession.update({
     where: { id: sessionId },
     data: {
-      state: STATES.AWAITING_ACCOUNT_ANSWER,
-      userId: null,
-      isVerified: false,
+      // If the user is still linked, drop them into VERIFIED (not the
+      // "are you registered?" prompt) so /credits and image flow still work.
+      state: preserveLink && currentIsVerified ? STATES.VERIFIED : STATES.AWAITING_ACCOUNT_ANSWER,
+      ...linkData,
       emailAttempts: 0,
       otpAttempts: 0,
       pendingEmail: null,
@@ -174,6 +192,7 @@ async function resetSessionToWelcome(sessionId: string, keepCredits: boolean, cu
       pendingTheme: null,
       lastSourceImage: null,
       lastSourceMimeType: null,
+      pendingImageIds: [],
       creditsUsed: keepCredits ? currentCreditsUsed : 0,
     },
   });
@@ -198,10 +217,22 @@ async function handleSlashCommand(answer: string, from: string, session: Session
     case "/restart":
     case "/clear":
     case "/reset":
-      // Preserve the guest credit counter so users can't farm free credits by
-      // restarting. /logout is the only path that wipes the counter (below).
-      await resetSessionToWelcome(session.id, true, session.creditsUsed);
-      await sendWelcomeMessage(from);
+      // Preserve the guest credit counter (no farming via /start).
+      // Preserve the merchant link if the user is verified — they shouldn't
+      // have to re-OTP every time they reset the chat. /logout clears both.
+      await resetSessionToWelcome(
+        session.id,
+        true, session.creditsUsed,
+        true, session.userId, session.isVerified,
+      );
+      if (session.isVerified && session.userId) {
+        await sendWhatsAppTextMessage({
+          to: from,
+          body: "✅ Session reset — you're still logged in.\n\nSend your product image(s) or type /help.",
+        });
+      } else {
+        await sendWelcomeMessage(from);
+      }
       return true;
 
     case "/new":
