@@ -58,14 +58,6 @@ export function AIStudio() {
   const [savingEnhanceFolder, setSavingEnhanceFolder] = useState("none");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const creditClassName = aiCredits === null
-    ? "text-teal-700"
-    : aiCredits <= 0
-      ? "text-red-600"
-      : aiCredits <= 5
-        ? "text-amber-600"
-        : "text-teal-700";
-
   const fetchFolders = useCallback(() => {
     api.get("/ai-studio/folders").then((res) => setFolders(res.data || [])).catch(() => toast.error("Failed to load folders"));
   }, []);
