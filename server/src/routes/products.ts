@@ -5,6 +5,20 @@ import { ShopifyService, ShopifyAuthError, ShopifyApiError } from "../services/s
 import { tijarflowProductToShopify } from "../services/shopifyMapper";
 import { SallaService, SallaAuthError, SallaApiError } from "../services/salla";
 import { tijarflowProductToSalla } from "../services/sallaMapper";
+import { signMediaPath, MEDIA_TTL_SHORT, MEDIA_TTL_MARKETPLACE } from "../lib/mediaSign";
+
+function signProductImages<T extends { images?: unknown }>(product: T): T {
+  if (!Array.isArray(product.images)) return product;
+  const signed = (product.images as string[]).map((u) => {
+    if (typeof u !== "string") return u;
+    if (u.startsWith("/media/")) {
+      const relPath = u.slice("/media/".length).split("?")[0];
+      return signMediaPath(relPath, MEDIA_TTL_SHORT);
+    }
+    return u;
+  });
+  return { ...product, images: signed };
+}
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -43,7 +57,7 @@ router.get("/", async (req: AuthRequest, res: Response): Promise<void> => {
       prisma.product.count({ where }),
     ]);
 
-    res.json({ data, total, page, pageSize });
+    res.json({ data: data.map(signProductImages), total, page, pageSize });
   } catch {
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   }
@@ -62,7 +76,7 @@ router.get("/:id", async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
-    res.json(product);
+    res.json(signProductImages(product));
   } catch {
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   }
@@ -103,7 +117,7 @@ router.post("/", async (req: AuthRequest, res: Response): Promise<void> => {
       },
     });
 
-    res.status(201).json(product);
+    res.status(201).json(signProductImages(product));
   } catch {
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   }
@@ -144,7 +158,7 @@ router.put("/:id", async (req: AuthRequest, res: Response): Promise<void> => {
       },
     });
 
-    res.json(product);
+    res.json(signProductImages(product));
   } catch {
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   }
@@ -203,8 +217,15 @@ router.post("/push", async (req: AuthRequest, res: Response): Promise<void> => {
     }
 
     const base = (process.env.PUBLIC_BASE_URL || "https://app.tijarflow.com").replace(/\/+$/, "");
+    // For marketplace push we need Shopify/Salla to fetch the image over the
+    // public internet, so relative /media/... paths get absolutized AND signed
+    // with a 7-day TTL. External (already-http) URLs are passed through.
     const absolutize = (url: string): string => {
       if (/^https?:\/\//i.test(url)) return url;
+      if (url.startsWith("/media/")) {
+        const relPath = url.slice("/media/".length).split("?")[0];
+        return `${base}${signMediaPath(relPath, MEDIA_TTL_MARKETPLACE)}`;
+      }
       if (url.startsWith("/")) return `${base}${url}`;
       return url;
     };

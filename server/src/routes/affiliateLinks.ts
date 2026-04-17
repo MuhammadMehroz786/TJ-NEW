@@ -37,9 +37,26 @@ router.post("/", authenticate, requireRole("CREATOR"), async (req: AuthRequest, 
       return;
     }
 
-    const product = await prisma.product.findUnique({ where: { id: productId } });
+    // Prevent open-redirect / phishing / javascript: URLs — only http(s) allowed.
+    let parsed: URL;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      res.status(400).json({ error: "targetUrl must be a valid URL", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      res.status(400).json({ error: "targetUrl must use http or https", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    // Creators can only link to ACTIVE products that merchants have explicitly
+    // made available. No DRAFT/ARCHIVED access even if the creator knows the ID.
+    const product = await prisma.product.findFirst({
+      where: { id: productId, status: "ACTIVE" },
+    });
     if (!product) {
-      res.status(404).json({ error: "Product not found", code: "NOT_FOUND" });
+      res.status(404).json({ error: "Product not found or not available", code: "NOT_FOUND" });
       return;
     }
 
@@ -110,6 +127,18 @@ router.get("/track/:slug", async (req: Request, res: Response): Promise<void> =>
       },
     });
 
+    // Defense-in-depth: re-check scheme at redirect time, even though /create
+    // validates it. Legacy rows created before validation are protected here.
+    try {
+      const u = new URL(link.targetUrl);
+      if (u.protocol !== "http:" && u.protocol !== "https:") {
+        res.status(400).json({ error: "Link has an unsafe target URL" });
+        return;
+      }
+    } catch {
+      res.status(400).json({ error: "Link has an invalid target URL" });
+      return;
+    }
     res.redirect(302, link.targetUrl);
   } catch {
     res.status(500).json({ error: "Internal server error" });

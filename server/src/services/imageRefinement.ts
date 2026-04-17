@@ -1,6 +1,21 @@
 import { GoogleGenAI } from "@google/genai";
 
-export function buildRefinementPrompt(instruction: string): string {
+// Strip characters + tokens that attackers commonly use to break out of a
+// delimited prompt section (newlines, backticks, triple-quotes, markdown
+// headers, "system:" roleplay, common jailbreak phrases). After sanitization
+// we also length-cap the instruction.
+export function sanitizeInstruction(raw: string): string {
+  let s = raw.replace(/[\r\n]+/g, " "); // no line breaks
+  s = s.replace(/[`"']{3,}/g, "");       // no triple quotes
+  s = s.replace(/<[^>]{0,120}>/g, "");    // strip angle-bracket tags
+  s = s.replace(/\b(?:system|assistant|user)\s*:/gi, "");
+  s = s.replace(/\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above|earlier)/gi, "");
+  s = s.replace(/\s+/g, " ").trim();
+  return s.slice(0, 500);
+}
+
+export function buildRefinementPrompt(rawInstruction: string): string {
+  const instruction = sanitizeInstruction(rawInstruction);
   return `You are a professional e-commerce product photographer refining a product image based on client feedback. Think of this as a careful, subtle edit — not a full regeneration.
 
 PRODUCT PRESERVATION (most important):

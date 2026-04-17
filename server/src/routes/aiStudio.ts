@@ -7,6 +7,16 @@ import crypto from "crypto";
 import { authenticate, AuthRequest, requireRole } from "../middleware/auth";
 import { AICreditError, consumeWeeklyAICredit, refundOneCredit } from "../services/aiCredits";
 import { refineProductImage } from "../services/imageRefinement";
+import { signMediaPath, MEDIA_TTL_SHORT } from "../lib/mediaSign";
+
+// Sign the imageUrl on every record returned to the client. Stored DB value
+// stays as a plain /media/... path; signatures are minted per-response.
+function signRecord<T extends { imageUrl: string; imagePath: string }>(rec: T): T {
+  return { ...rec, imageUrl: signMediaPath(rec.imagePath, MEDIA_TTL_SHORT) };
+}
+function signRecords<T extends { imageUrl: string; imagePath: string }>(recs: T[]): T[] {
+  return recs.map(signRecord);
+}
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -33,10 +43,48 @@ const backgroundScenes: Record<string, string> = {
     "a smooth seamless gradient background transitioning from soft warm white to light grey, with subtle ambient lighting from above creating a gentle shadow beneath the product",
 };
 
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB decoded
+
+function detectImageMime(buf: Buffer): "image/png" | "image/jpeg" | "image/webp" | null {
+  if (buf.length < 12) return null;
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  // WebP: "RIFF" .... "WEBP"
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return "image/webp";
+  return null;
+}
+
+class ImageValidationError extends Error {
+  status = 400;
+  code = "INVALID_IMAGE";
+}
+
 function parseBase64Image(input: string): { mimeType: string; base64: string; ext: string } {
   const match = input.match(/^data:([^;]+);base64,(.+)$/);
-  const mimeType = match ? match[1] : "image/png";
+  const declaredMime = match ? match[1] : "image/png";
   const base64 = match ? match[2] : input.split(",")[1] || input;
+
+  // Validate by magic bytes — never trust the data-URI prefix. This blocks
+  // attempts to smuggle SVG, HTML, or non-image files by labelling them image/png.
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(base64, "base64");
+  } catch {
+    throw new ImageValidationError("Image data is not valid base64");
+  }
+  if (buf.length === 0) throw new ImageValidationError("Image is empty");
+  if (buf.length > MAX_IMAGE_BYTES) {
+    throw new ImageValidationError(`Image too large (max ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB)`);
+  }
+  const actualMime = detectImageMime(buf);
+  if (!actualMime) {
+    throw new ImageValidationError("Unsupported image format — use JPEG, PNG, or WebP");
+  }
+  // If declared mime disagrees with the bytes, trust the bytes.
+  const mimeType = actualMime;
   const extMap: Record<string, string> = {
     "image/png": "png",
     "image/jpeg": "jpg",
@@ -165,7 +213,7 @@ router.get("/images", async (req: AuthRequest, res: Response): Promise<void> => 
       prisma.aiStudioImage.count({ where }),
     ]);
 
-    res.json({ data, total, page, pageSize });
+    res.json({ data: signRecords(data), total, page, pageSize });
   } catch {
     res.status(500).json({ error: "Failed to load AI Studio images", code: "INTERNAL_ERROR" });
   }
@@ -184,6 +232,18 @@ router.post("/enhance", async (req: AuthRequest, res: Response): Promise<void> =
     if (!process.env.GEMINI_API_KEY) {
       res.status(500).json({ error: "GEMINI_API_KEY is not set", code: "CONFIG_ERROR" });
       return;
+    }
+
+    // Validate image BEFORE consuming credit — reject SVG/HTML/oversize early
+    let parsedInput: { mimeType: string; base64: string; ext: string };
+    try {
+      parsedInput = parseBase64Image(image);
+    } catch (err) {
+      if (err instanceof ImageValidationError) {
+        res.status(err.status).json({ error: err.message, code: err.code });
+        return;
+      }
+      throw err;
     }
 
     const creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
@@ -220,7 +280,6 @@ STRICT RULES:
 - Do NOT crop or change the framing — keep the product centered and properly composed.
 - The result must look like an authentic photograph, not a composite or collage.`;
 
-      const parsedInput = parseBase64Image(image);
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
       const response = await ai.models.generateContent({
@@ -235,12 +294,14 @@ STRICT RULES:
       const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
       if (!imagePart?.inlineData?.data) throw new Error("No image data in response.");
 
-      const outputMimeType = imagePart.inlineData.mimeType || "image/png";
+      const rawOutputMime = imagePart.inlineData.mimeType || "image/png";
       const extMap: Record<string, string> = {
         "image/png": "png",
         "image/jpeg": "jpg",
         "image/webp": "webp",
       };
+      // Only accept the 3 image mime types we support; ignore anything else Gemini might return
+      const outputMimeType = extMap[rawOutputMime] ? rawOutputMime : "image/png";
       const outputExt = extMap[outputMimeType] || "png";
       const outputBase64 = imagePart.inlineData.data as string;
 
@@ -273,7 +334,7 @@ STRICT RULES:
       });
 
       res.status(201).json({
-        ...record,
+        ...signRecord(record),
         remainingCredits: creditUsage.totalCredits,
         weeklyCredits: creditUsage.weeklyCredits,
         purchasedCredits: creditUsage.purchasedCredits,
@@ -406,7 +467,7 @@ router.post("/refine", async (req: AuthRequest, res: Response): Promise<void> =>
       });
 
       res.status(201).json({
-        ...record,
+        ...signRecord(record),
         remainingCredits: creditUsage.totalCredits,
         weeklyCredits: creditUsage.weeklyCredits,
         purchasedCredits: creditUsage.purchasedCredits,
@@ -467,7 +528,7 @@ router.patch("/images/:id/folder", async (req: AuthRequest, res: Response): Prom
       data: { folderId: targetFolderId },
       include: { folder: { select: { id: true, name: true } } },
     });
-    res.json(updated);
+    res.json(signRecord(updated));
   } catch {
     res.status(500).json({ error: "Failed to move image", code: "INTERNAL_ERROR" });
   }
@@ -486,7 +547,7 @@ router.get("/library", async (req: AuthRequest, res: Response): Promise<void> =>
       take: 200,
       include: { folder: { select: { id: true, name: true } } },
     });
-    res.json({ data });
+    res.json({ data: signRecords(data) });
   } catch {
     res.status(500).json({ error: "Failed to load library", code: "INTERNAL_ERROR" });
   }

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { GoogleGenAI } from "@google/genai";
@@ -19,7 +20,7 @@ import {
   sendOtpEmail,
   verifyOtp,
 } from "../services/otp";
-import { refineProductImage } from "../services/imageRefinement";
+import { refineProductImage, sanitizeInstruction } from "../services/imageRefinement";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -266,10 +267,50 @@ router.get("/webhook", (req: Request, res: Response): void => {
   res.status(403).json({ error: "Verification failed" });
 });
 
-// Incoming WhatsApp events/messages
+function verifyMetaSignature(rawBody: Buffer, header: string | undefined, appSecret: string): boolean {
+  if (!header || !header.startsWith("sha256=")) return false;
+  const provided = header.slice("sha256=".length);
+  const expected = crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex");
+  const a = Buffer.from(provided, "hex");
+  const b = Buffer.from(expected, "hex");
+  if (a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+// Incoming WhatsApp events/messages — body is raw Buffer (registered in index.ts)
 router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   try {
-    const messages = extractIncomingMessages(req.body);
+    const appSecret = process.env.WHATSAPP_APP_SECRET;
+    const rawBody: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body || {}));
+
+    // Signature check is gated on WHATSAPP_APP_SECRET being set. If it's missing,
+    // we REJECT in production rather than fail-open silently.
+    if (!appSecret) {
+      console.error("[WhatsApp] WHATSAPP_APP_SECRET is not set — rejecting webhook POST");
+      res.status(503).json({ error: "Webhook not configured" });
+      return;
+    }
+    const sigHeader = req.headers["x-hub-signature-256"];
+    const sig = Array.isArray(sigHeader) ? sigHeader[0] : sigHeader;
+    if (!verifyMetaSignature(rawBody, sig, appSecret)) {
+      console.warn("[WhatsApp] rejected webhook POST with bad signature");
+      res.status(403).json({ error: "Invalid signature" });
+      return;
+    }
+
+    let parsedBody: unknown;
+    try {
+      parsedBody = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      res.status(400).json({ error: "Invalid JSON" });
+      return;
+    }
+
+    const messages = extractIncomingMessages(parsedBody);
 
     res.status(200).json({ ok: true });
 
@@ -441,6 +482,17 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         }
 
         const otp = generateOtp();
+        try {
+          await sendOtpEmail(email, otp);
+        } catch (err) {
+          console.error("[WhatsApp] OTP email send failed:", (err as Error)?.message || err);
+          await sendWhatsAppTextMessage({
+            to: from,
+            body: "⚠️ We can't send verification emails right now. Please try again in a few minutes or contact support.",
+          });
+          continue;
+        }
+
         const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
         await prisma.whatsAppSession.update({
           where: { id: session.id },
@@ -453,12 +505,6 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             emailAttempts: 0,
           },
         });
-
-        try {
-          await sendOtpEmail(email, otp);
-        } catch (err) {
-          console.error("Failed to send OTP email:", err);
-        }
 
         await sendWhatsAppTextMessage({
           to: from,
@@ -558,7 +604,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           });
           continue;
         }
-        const theme = message.text.trim().slice(0, 500);
+        const theme = sanitizeInstruction(message.text);
         if (theme.length < 3) {
           await sendWhatsAppTextMessage({ to: from, body: "Please provide a more descriptive theme (at least 3 characters)." });
           continue;

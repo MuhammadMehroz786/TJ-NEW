@@ -225,21 +225,28 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
     const creditsNum = parseInt(credits, 10);
 
     try {
-      await prisma.$transaction(async (tx) => {
-        // Mark purchase as COMPLETED
-        await tx.creditPurchase.update({
-          where: { stripeSessionId: session.id },
+      // Idempotent update: flip PENDING→COMPLETED only once. If the row is
+      // already COMPLETED (duplicate webhook delivery or replay), updateMany
+      // returns count:0 and we skip the credit increment entirely.
+      const result = await prisma.$transaction(async (tx) => {
+        const updated = await tx.creditPurchase.updateMany({
+          where: { stripeSessionId: session.id, status: "PENDING" },
           data: { status: "COMPLETED" },
         });
-
-        // Add purchased credits to the user's purchasedCredits bank
-        await tx.user.update({
-          where: { id: userId },
-          data: { purchasedCredits: { increment: creditsNum } },
-        });
+        if (updated.count === 1) {
+          await tx.user.update({
+            where: { id: userId },
+            data: { purchasedCredits: { increment: creditsNum } },
+          });
+        }
+        return updated.count;
       });
 
-      console.log(`✅ Credits granted: ${creditsNum} credits to user ${userId}`);
+      if (result === 1) {
+        console.log(`✅ Credits granted: ${creditsNum} credits to user ${userId} (session=${session.id})`);
+      } else {
+        console.log(`↻ Webhook replay ignored for session=${session.id} (already completed)`);
+      }
     } catch (err) {
       console.error("Failed to process webhook:", err);
       res.status(500).json({ error: "Failed to process payment" });
@@ -278,11 +285,20 @@ router.post("/verify-session", authenticate, async (req: AuthRequest, res: Respo
 });
 
 // ── POST /api/credits/grant ──────────────────────────────────────────────────
-// Dev-only endpoint to grant 50 purchased credits without Stripe. Gated by env
-// flag so it can be disabled in production once Stripe is wired up.
+// Admin-only: grant 50 purchased credits without Stripe (testing/comps).
+// Requires BOTH an env flag (ENABLE_DEV_CREDIT_GRANT) AND the caller's userId
+// to appear in the DEV_CREDIT_GRANT_USER_IDS comma-separated allowlist. This
+// way, even if the env flag is left on in production, an attacker-signed
+// account still cannot self-grant credits.
 router.post("/grant", authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   if (process.env.ENABLE_DEV_CREDIT_GRANT !== "true") {
     res.status(403).json({ error: "Credit granting is disabled", code: "FORBIDDEN" });
+    return;
+  }
+  const allowlist = (process.env.DEV_CREDIT_GRANT_USER_IDS || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  if (allowlist.length === 0 || !allowlist.includes(req.auth!.userId)) {
+    res.status(403).json({ error: "Not authorized", code: "FORBIDDEN" });
     return;
   }
 
