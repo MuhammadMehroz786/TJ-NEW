@@ -3,6 +3,8 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
+import { generateOtp, hashOtp, verifyOtp, OTP_TTL_MINUTES, OTP_MAX_ATTEMPTS } from "../services/otp";
+import { sendMail } from "../services/mail";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -11,18 +13,43 @@ function generateToken(userId: string, email: string, role: string): string {
   return jwt.sign({ userId, email, role }, process.env.JWT_SECRET!, { expiresIn: "7d" });
 }
 
-// POST /api/auth/signup
+async function sendSignupOtpEmail(email: string, name: string, otp: string): Promise<void> {
+  await sendMail({
+    to: email,
+    subject: `Your TijarFlow sign-up code: ${otp}`,
+    text: `Hi ${name},\n\nYour TijarFlow sign-up verification code is: ${otp}\n\nThis code will expire in ${OTP_TTL_MINUTES} minutes. If you didn't create an account, you can safely ignore this email.\n\n— TijarFlow`,
+    html: `<!doctype html>
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:40px auto;padding:32px;background:#f8fafc;border-radius:12px;">
+  <h2 style="color:#0f172a;margin:0 0 16px">Welcome to TijarFlow, ${name}!</h2>
+  <p style="color:#475569;font-size:15px;line-height:1.5;margin:0 0 24px">Enter this 6-digit code to finish creating your account:</p>
+  <div style="font-family:'SF Mono',Menlo,Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:8px;color:#0d9488;background:#ffffff;padding:20px;border-radius:8px;text-align:center;border:1px solid #e2e8f0;margin-bottom:24px">${otp}</div>
+  <p style="color:#64748b;font-size:13px;line-height:1.5;margin:0">Expires in ${OTP_TTL_MINUTES} minutes. If you didn't sign up, you can safely ignore this email.</p>
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0"/>
+  <p style="color:#94a3b8;font-size:12px;margin:0">TijarFlow — AI-powered product photography</p>
+</body></html>`,
+  });
+}
+
+// POST /api/auth/signup — start sign-up flow: park credentials, email OTP
 router.post("/signup", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { email, password, name, role } = req.body;
+    const { email: rawEmail, password, name, role } = req.body;
 
-    if (!email || !password || !name) {
+    if (!rawEmail || !password || !name) {
       res.status(400).json({ error: "Email, password, and name are required", code: "VALIDATION_ERROR" });
       return;
     }
-
+    if (typeof password !== "string" || password.length < 8) {
+      res.status(400).json({ error: "Password must be at least 8 characters", code: "VALIDATION_ERROR" });
+      return;
+    }
     if (role && role !== "MERCHANT" && role !== "CREATOR") {
       res.status(400).json({ error: "Role must be MERCHANT or CREATOR", code: "VALIDATION_ERROR" });
+      return;
+    }
+    const email = String(rawEmail).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(400).json({ error: "Please provide a valid email address", code: "VALIDATION_ERROR" });
       return;
     }
 
@@ -32,18 +59,137 @@ router.post("/signup", async (req: AuthRequest, res: Response): Promise<void> =>
       return;
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
-      data: { email, password: hashedPassword, name, role: role || "MERCHANT" },
+    const passwordHash = await bcrypt.hash(password, 10);
+    const otp = generateOtp();
+    const otpHash = hashOtp(otp);
+    const otpExpiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+
+    try {
+      await sendSignupOtpEmail(email, String(name).slice(0, 80), otp);
+    } catch (err) {
+      console.error("[signup] OTP email send failed:", (err as Error)?.message || err);
+      res.status(503).json({ error: "Couldn't send the verification email. Please try again in a minute.", code: "EMAIL_SEND_FAILED" });
+      return;
+    }
+
+    // Upsert so re-submits resend a fresh code without leaking that the email existed
+    await prisma.pendingSignup.upsert({
+      where: { email },
+      create: { email, passwordHash, name: String(name).trim().slice(0, 80), role: role || "MERCHANT", otpHash, otpExpiresAt, attempts: 0 },
+      update: { passwordHash, name: String(name).trim().slice(0, 80), role: role || "MERCHANT", otpHash, otpExpiresAt, attempts: 0 },
     });
 
-    const token = generateToken(user.id, user.email, user.role);
+    res.status(202).json({
+      pending: true,
+      email,
+      message: `A 6-digit verification code has been sent to ${email}. It expires in ${OTP_TTL_MINUTES} minutes.`,
+    });
+  } catch (err) {
+    console.error("[signup] error:", (err as Error)?.message || err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  }
+});
 
+// POST /api/auth/signup/verify — complete sign-up: validate OTP, create user, issue JWT
+router.post("/signup/verify", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { email: rawEmail, code } = req.body;
+    if (!rawEmail || !code) {
+      res.status(400).json({ error: "Email and code are required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    const email = String(rawEmail).trim().toLowerCase();
+    const digits = String(code).trim().replace(/\D/g, "");
+    if (digits.length !== 6) {
+      res.status(400).json({ error: "Code must be 6 digits", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    const pending = await prisma.pendingSignup.findUnique({ where: { email } });
+    if (!pending) {
+      res.status(404).json({ error: "No pending sign-up for this email. Start over.", code: "NOT_FOUND" });
+      return;
+    }
+    if (pending.otpExpiresAt.getTime() < Date.now()) {
+      await prisma.pendingSignup.delete({ where: { email } }).catch(() => {});
+      res.status(410).json({ error: "That code has expired. Please sign up again.", code: "OTP_EXPIRED" });
+      return;
+    }
+    if (pending.attempts >= OTP_MAX_ATTEMPTS) {
+      await prisma.pendingSignup.delete({ where: { email } }).catch(() => {});
+      res.status(429).json({ error: "Too many incorrect attempts. Please sign up again.", code: "OTP_LOCKED" });
+      return;
+    }
+    if (!verifyOtp(digits, pending.otpHash)) {
+      const updated = await prisma.pendingSignup.update({
+        where: { email },
+        data: { attempts: { increment: 1 } },
+      });
+      const left = Math.max(0, OTP_MAX_ATTEMPTS - updated.attempts);
+      res.status(400).json({ error: `Incorrect code. ${left} attempt${left === 1 ? "" : "s"} remaining.`, code: "OTP_INVALID" });
+      return;
+    }
+
+    // Guard against a race where someone signed up the same email via another path
+    const already = await prisma.user.findUnique({ where: { email } });
+    if (already) {
+      await prisma.pendingSignup.delete({ where: { email } }).catch(() => {});
+      res.status(409).json({ error: "Email already in use", code: "CONFLICT" });
+      return;
+    }
+
+    const user = await prisma.user.create({
+      data: {
+        email,
+        password: pending.passwordHash,
+        name: pending.name,
+        role: pending.role,
+      },
+    });
+    await prisma.pendingSignup.delete({ where: { email } }).catch(() => {});
+
+    const token = generateToken(user.id, user.email, user.role);
     res.status(201).json({
       token,
       user: { id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.createdAt, updatedAt: user.updatedAt },
     });
-  } catch {
+  } catch (err) {
+    console.error("[signup/verify] error:", (err as Error)?.message || err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  }
+});
+
+// POST /api/auth/signup/resend — regenerate + resend the OTP if user lost it
+router.post("/signup/resend", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!email) {
+      res.status(400).json({ error: "Email is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    const pending = await prisma.pendingSignup.findUnique({ where: { email } });
+    if (!pending) {
+      // Respond like success to avoid enumeration
+      res.json({ message: "If a sign-up is pending for that email, a new code has been sent." });
+      return;
+    }
+    const otp = generateOtp();
+    const otpHash = hashOtp(otp);
+    const otpExpiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+    try {
+      await sendSignupOtpEmail(email, pending.name, otp);
+    } catch (err) {
+      console.error("[signup/resend] OTP email send failed:", (err as Error)?.message || err);
+      res.status(503).json({ error: "Couldn't send the email. Try again shortly.", code: "EMAIL_SEND_FAILED" });
+      return;
+    }
+    await prisma.pendingSignup.update({
+      where: { email },
+      data: { otpHash, otpExpiresAt, attempts: 0 },
+    });
+    res.json({ message: "If a sign-up is pending for that email, a new code has been sent." });
+  } catch (err) {
+    console.error("[signup/resend] error:", (err as Error)?.message || err);
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   }
 });

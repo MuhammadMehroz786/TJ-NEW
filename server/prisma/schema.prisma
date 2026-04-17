@@ -314,6 +314,26 @@ model WhatsAppEnhancement {
   @@index([sessionId, createdAt])
 }
 
+// Signup OTP flow. Before a real User row is created, we park the submitted
+// credentials here with a 6-digit email-verification code. Verified rows are
+// deleted (User row created elsewhere); expired/abandoned ones are cleaned up
+// by TTL or on next signup attempt for the same email.
+model PendingSignup {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  passwordHash      String
+  name              String
+  role              UserRole @default(MERCHANT)
+  otpHash           String
+  otpExpiresAt      DateTime
+  attempts          Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([email])
+  @@index([otpExpiresAt])
+}
+
 model CreditPurchase {
   id              String               @id @default(uuid())
   userId          String
