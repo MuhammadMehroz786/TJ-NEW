@@ -21,8 +21,10 @@ function getTransport(): Transporter {
   cached = nodemailer.createTransport({
     host,
     port,
-    secure: port === 465,      // true for 465 (implicit TLS), false for 587 (STARTTLS)
+    secure: port === 465,      // true for 465 (implicit TLS), false for 587/2525 (STARTTLS)
+    requireTLS: port !== 465,  // force TLS upgrade when not using implicit TLS
     auth: { user, pass },
+    connectionTimeout: 20_000,
   });
   return cached;
 }
