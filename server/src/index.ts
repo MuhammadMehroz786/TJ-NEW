@@ -34,6 +34,10 @@ import sallaRoutes from "./routes/salla";
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Behind nginx on the VPS — trust the immediate proxy for X-Forwarded-For so
+// express-rate-limit can key on the real client IP instead of 127.0.0.1.
+app.set("trust proxy", 1);
+
 const allowedOrigins = [
   "http://localhost:5173",
   "https://app.tijarflow.com",
