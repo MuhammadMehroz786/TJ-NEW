@@ -58,6 +58,8 @@ export function AIStudio() {
   const [savingEnhanceFolder, setSavingEnhanceFolder] = useState("none");
   const [refineInstruction, setRefineInstruction] = useState("");
   const [refining, setRefining] = useState(false);
+  const [refineHistory, setRefineHistory] = useState<AiStudioImage[]>([]);
+  const [undoing, setUndoing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFolders = useCallback(() => {
@@ -153,6 +155,7 @@ export function AIStudio() {
     const trimmed = instruction.trim();
     if (trimmed.length < 3) return toast.error("Describe the refinement in at least 3 characters");
     setRefining(true);
+    const previous = previewImage;
     try {
       const res = await api.post("/ai-studio/refine", {
         imageId: previewImage.id,
@@ -160,6 +163,7 @@ export function AIStudio() {
       }, { timeout: 120000 });
       const refined: AiStudioImage = res.data;
       setImages((prev) => [refined, ...prev]);
+      setRefineHistory((prev) => [...prev, previous]);
       setPreviewImage(refined);
       setRefineInstruction("");
       if (typeof res.data?.remainingCredits === "number") {
@@ -173,6 +177,24 @@ export function AIStudio() {
       toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Refinement failed");
     } finally {
       setRefining(false);
+    }
+  };
+
+  const handleUndoRefine = async () => {
+    if (!previewImage || refineHistory.length === 0) return;
+    const prevImage = refineHistory[refineHistory.length - 1];
+    const currentRefined = previewImage;
+    setUndoing(true);
+    try {
+      await api.delete(`/ai-studio/images/${currentRefined.id}`);
+      setImages((prev) => prev.filter((img) => img.id !== currentRefined.id));
+      setPreviewImage(prevImage);
+      setRefineHistory((prev) => prev.slice(0, -1));
+      toast.success("Refinement undone");
+    } catch {
+      toast.error("Failed to undo refinement");
+    } finally {
+      setUndoing(false);
     }
   };
 
@@ -410,6 +432,7 @@ export function AIStudio() {
           if (!open) {
             setPreviewImage(null);
             setRefineInstruction("");
+            setRefineHistory([]);
           }
         }}
       >
@@ -422,7 +445,21 @@ export function AIStudio() {
               <div className="space-y-2 border-t pt-4">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-slate-900">Refine this image</p>
-                  <span className="text-xs text-slate-500">Costs 1 credit</span>
+                  <div className="flex items-center gap-2">
+                    {refineHistory.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleUndoRefine}
+                        disabled={undoing || refining}
+                        className="h-7 px-2.5 text-xs"
+                      >
+                        {undoing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                        Undo
+                      </Button>
+                    )}
+                    <span className="text-xs text-slate-500">Costs 1 credit</span>
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {[
