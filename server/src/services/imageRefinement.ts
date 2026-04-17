@@ -39,7 +39,7 @@ export async function refineProductImage(
   const prompt = buildRefinementPrompt(instruction);
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash-image",
+    model: "nano-banana-pro-preview",
     contents: [{ inlineData: { mimeType, data: base64 } }, prompt],
     config: { responseModalities: ["image", "text"] },
   });
