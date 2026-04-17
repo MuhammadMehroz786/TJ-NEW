@@ -149,7 +149,7 @@ router.delete("/folders/:id", async (req: AuthRequest, res: Response): Promise<v
 router.get("/images", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string) || 24));
+    const pageSize = Math.min(500, Math.max(1, parseInt(req.query.pageSize as string) || 24));
 
     const where = { userId: req.auth!.userId };
     const [data, total] = await Promise.all([

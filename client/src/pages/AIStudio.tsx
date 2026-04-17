@@ -255,7 +255,7 @@ export function AIStudio() {
       setImages((prev) => prev.map((img) => (img.id === imageId ? res.data : img)));
       fetchFolders();
       const folderName = folderId ? folders.find((f) => f.id === folderId)?.name : null;
-      toast.success(folderName ? `Moved to "${folderName}"` : "Moved to Media");
+      toast.success(folderName ? `Moved to "${folderName}"` : "Removed from folder");
     } catch {
       toast.error("Failed to move image");
     }
@@ -273,7 +273,7 @@ export function AIStudio() {
       <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">AI Studio</h1>
-          <p className="text-slate-500 text-sm mt-1">{images.length} items in Media</p>
+          <p className="text-slate-500 text-sm mt-1">{images.length} items in All Images</p>
         </div>
         {/* Credits pill */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -318,7 +318,7 @@ export function AIStudio() {
                 <Button onClick={handleCreateFolder} variant="outline" size="icon"><FolderPlus className="h-4 w-4" /></Button>
               </div>
               <div className="space-y-1 max-h-[520px] overflow-y-auto pr-1">
-                <button className={`w-full text-left px-2.5 py-2 rounded-md border text-sm ${selectedFolderId === "all" ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 hover:bg-slate-50"}`} onClick={() => setSelectedFolderId("all")}>Media ({images.length})</button>
+                <button className={`w-full text-left px-2.5 py-2 rounded-md border text-sm ${selectedFolderId === "all" ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 hover:bg-slate-50"}`} onClick={() => setSelectedFolderId("all")}>All Images ({images.length})</button>
                 {folders.map((folder) => (
                   <div key={folder.id} className="flex items-center gap-1">
                     <button className={`flex-1 text-left px-2.5 py-2 rounded-md border text-sm ${selectedFolderId === folder.id ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 hover:bg-slate-50"}`} onClick={() => setSelectedFolderId(folder.id)}>{folder.name} ({folder._count?.images || 0})</button>
@@ -369,7 +369,7 @@ export function AIStudio() {
                 <Select value={selectedFolderId} onValueChange={setSelectedFolderId}>
                   <SelectTrigger className="w-[200px]"><SelectValue placeholder="Save in folder" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Media (no folder)</SelectItem>
+                    <SelectItem value="all">Unfiled</SelectItem>
                     {folders.map((folder) => <SelectItem key={folder.id} value={folder.id}>{folder.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -379,7 +379,7 @@ export function AIStudio() {
               </div>
 
               <div className="flex items-center gap-3 mt-5 mb-3">
-                <h2 className="text-base font-semibold text-slate-900">{selectedFolderId === "all" ? "Media" : folders.find((f) => f.id === selectedFolderId)?.name || "Folder"}</h2>
+                <h2 className="text-base font-semibold text-slate-900">{selectedFolderId === "all" ? "All Images" : folders.find((f) => f.id === selectedFolderId)?.name || "Folder"}</h2>
                 <div className="relative flex-1 max-w-sm">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <Input placeholder="Search background or folder..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
@@ -411,7 +411,7 @@ export function AIStudio() {
                               <button className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center hover:bg-slate-50"><Plus className="h-4 w-4 text-slate-600" /></button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem onClick={() => handleMoveImageToFolder(item.id, null)}><Check className="mr-2 h-4 w-4" />Media (No Folder)</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleMoveImageToFolder(item.id, null)}><Check className="mr-2 h-4 w-4" />Remove from folder</DropdownMenuItem>
                               {folders.map((folder) => <DropdownMenuItem key={folder.id} onClick={() => handleMoveImageToFolder(item.id, folder.id)}><FolderPlus className="mr-2 h-4 w-4" />{folder.name}</DropdownMenuItem>)}
                             </DropdownMenuContent>
                           </DropdownMenu>
@@ -526,7 +526,7 @@ export function AIStudio() {
                 <Select value={savingEnhanceFolder} onValueChange={setSavingEnhanceFolder}>
                   <SelectTrigger className="w-56"><SelectValue placeholder="Choose folder" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Media (No Folder)</SelectItem>
+                    <SelectItem value="none">Unfiled</SelectItem>
                     {folders.map((folder) => <SelectItem key={folder.id} value={folder.id}>{folder.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
