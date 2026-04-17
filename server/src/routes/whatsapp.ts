@@ -21,6 +21,7 @@ import {
   verifyOtp,
 } from "../services/otp";
 import { refineProductImage, sanitizeInstruction } from "../services/imageRefinement";
+import { addImageToBatch, type PendingImage } from "../services/whatsappBatch";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -107,9 +108,9 @@ async function enhanceProductImage(
   };
 }
 
-async function sendEnhancedImage(to: string, base64: string, mimeType: string): Promise<void> {
+async function sendEnhancedImage(to: string, base64: string, mimeType: string, caption?: string): Promise<string | null> {
   const mediaId = await uploadWhatsAppMedia(base64, mimeType);
-  await sendWhatsAppImageById({ to, mediaId });
+  return sendWhatsAppImageById({ to, mediaId, caption });
 }
 
 async function sendWelcomeMessage(to: string): Promise<void> {
@@ -134,7 +135,10 @@ async function sendHelp(to: string): Promise<void> {
       "/new — Start fresh with a new image\n" +
       "/logout — Unlink your merchant account\n" +
       "/help — Show this menu\n\n" +
-      "Send a product image anytime and I'll enhance it! After each result you can request refinements like _make the background darker_ or _add warm lighting_.",
+      "📸 *How to use:*\n" +
+      "• Send one or multiple product images — I'll enhance them all together after 5 seconds.\n" +
+      "• *Reply* to any enhanced image with instructions like _make background darker_ to refine just that one.\n" +
+      "• Or type a new refinement to tweak your most recent image.",
   });
 }
 
@@ -341,6 +345,27 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
       if (await handleSlashCommand(answer, from, session)) continue;
 
+      // Reply-to-image refinement: if the user quoted one of our enhanced
+      // images with free text, route it directly to refinement regardless of
+      // current state. This lets users iterate on any past image at any time.
+      if (
+        message.type === "text" &&
+        message.text &&
+        message.contextMessageId &&
+        (session.isVerified || session.state === STATES.POST_ENHANCEMENT || session.state === STATES.AWAITING_GUEST_IMAGE)
+      ) {
+        const match = await prisma.whatsAppEnhancement.findUnique({
+          where: { outboundWamid: message.contextMessageId },
+        });
+        if (match && match.sessionId === session.id) {
+          const instruction = message.text.trim();
+          if (instruction.length >= 3) {
+            await handleRefinement(session, instruction, from, message.contextMessageId);
+            continue;
+          }
+        }
+      }
+
       if (!session.isVerified && isRestartTrigger(answer)) {
         await resetSessionToWelcome(session.id, false, 0);
         await sendWelcomeMessage(from);
@@ -394,14 +419,14 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           continue;
         }
 
-        // Free-text refinement
+        // Free-text refinement — may target a specific image via reply-quote
         if (message.type === "text" && message.text) {
           const instruction = message.text.trim();
           if (instruction.length < 3) {
             await sendWhatsAppTextMessage({ to: from, body: "Please describe the refinement in a bit more detail (at least 3 characters)." });
             continue;
           }
-          await handleRefinement(session, instruction, from);
+          await handleRefinement(session, instruction, from, message.contextMessageId);
           continue;
         }
 
@@ -670,97 +695,225 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-async function handleVerifiedImageEnhancement(session: SessionRow, imageId: string, from: string): Promise<void> {
-  await sendWhatsAppTextMessage({ to: from, body: "✨ Enhancing your product image... please wait a moment." });
-  try {
-    if (session.userId) {
-      await consumeWeeklyAICredit(prisma, session.userId);
-    }
-    const media = await downloadWhatsAppMedia(imageId);
-    const enhanced = await enhanceProductImage(media.base64, media.mimeType);
-    await sendEnhancedImage(from, enhanced.base64, enhanced.mimeType);
+/**
+ * Enqueue an inbound image into the per-user batch window. First image gets
+ * an ack message ("Got it! Send more or wait 5s…"); subsequent images are
+ * added silently to avoid chat spam. After 5s of silence the batch is flushed.
+ */
+async function enqueueImage(session: SessionRow, imageId: string, from: string): Promise<void> {
+  const result = addImageToBatch(from, imageId, async (phoneNumber, images) => {
+    // Re-load the session at flush time — state may have changed since enqueue
+    const freshSession = await prisma.whatsAppSession.findUnique({ where: { phoneNumber } });
+    if (!freshSession) return;
+    await processBatch(freshSession, images, phoneNumber);
+  });
 
-    await prisma.whatsAppSession.update({
-      where: { id: session.id },
-      data: {
-        state: STATES.POST_ENHANCEMENT,
-        lastSourceImage: media.base64,
-        lastSourceMimeType: media.mimeType,
-      },
+  if (result.newBatch) {
+    await sendWhatsAppTextMessage({
+      to: from,
+      body: "✨ Got your image! Send more if you want — I'll process them together after a few seconds of silence.",
     });
+  }
+}
 
-    let creditMsg = "✅ Done!";
-    if (session.userId) {
-      try {
-        const credits = await getAICredits(prisma, session.userId);
-        creditMsg = `✅ Done! Credits remaining: ${credits.weeklyCredits} weekly${credits.purchasedCredits > 0 ? ` + ${credits.purchasedCredits} purchased` : ""}.`;
-      } catch {
-        // non-critical
+/**
+ * Process a batch of queued images. Downloads, consumes credits (one per
+ * image), enhances in parallel, sends results back, persists enhancement
+ * records so follow-up replies can target a specific image.
+ */
+async function processBatch(session: SessionRow, images: PendingImage[], from: string): Promise<void> {
+  if (images.length === 0) return;
+
+  // Figure out how many we can afford. Guests and verified use different pools.
+  const total = images.length;
+  let canEnhance = total;
+
+  if (session.isVerified && session.userId) {
+    try {
+      const balance = await getAICredits(prisma, session.userId);
+      canEnhance = Math.min(total, balance.totalCredits);
+      if (canEnhance === 0) {
+        await sendWhatsAppTextMessage({
+          to: from,
+          body: `⚠️ You've used all your AI credits. They reset every Monday.\n\nVisit ${SIGNUP_URL} to purchase more credits.`,
+        });
+        return;
       }
+    } catch {
+      canEnhance = total; // fail-open; individual consumes will enforce
     }
-    await sendWhatsAppTextMessage({ to: from, body: creditMsg });
-    await sendRefinementButtons(from);
-  } catch (err) {
-    if (err instanceof AICreditError) {
+  } else {
+    const remaining = Math.max(0, session.creditsLimit - session.creditsUsed);
+    canEnhance = Math.min(total, remaining);
+    if (canEnhance === 0) {
+      await prisma.whatsAppSession.update({
+        where: { id: session.id },
+        data: { state: STATES.EXHAUSTED },
+      });
       await sendWhatsAppTextMessage({
         to: from,
-        body: `⚠️ You've used all your AI credits for this week. They reset every Monday.\n\nVisit ${SIGNUP_URL} to purchase more credits.`,
+        body: `Your 5 free enhancements are used up! 🎉\n\nSign up: ${SIGNUP_URL}\n\nAlready have an account? Type /start.`,
       });
       return;
     }
-    console.error("WhatsApp verified enhancement error:", err);
-    await sendWhatsAppTextMessage({ to: from, body: "Sorry, we could not enhance your image right now. Please try again." });
   }
-}
 
-async function handleGuestImageEnhancement(session: SessionRow, imageId: string, from: string): Promise<void> {
-  const updated = await prisma.whatsAppSession.update({
-    where: { id: session.id },
-    data: { creditsUsed: { increment: 1 } },
-    select: { creditsUsed: true, creditsLimit: true, pendingTheme: true },
+  const skipped = total - canEnhance;
+  await sendWhatsAppTextMessage({
+    to: from,
+    body: skipped > 0
+      ? `🎨 Enhancing ${canEnhance} of ${total} images (${skipped} skipped — not enough credits). This may take a moment...`
+      : `🎨 Enhancing ${canEnhance} image${canEnhance === 1 ? "" : "s"}... This may take a moment.`,
   });
-  const remainingAfter = Math.max(0, updated.creditsLimit - updated.creditsUsed);
-  const exhausted = remainingAfter <= 0;
-  const theme = updated.pendingTheme || STUDIO_SCENE;
 
-  await sendWhatsAppTextMessage({ to: from, body: "✨ Enhancing your product image... please wait a moment." });
+  const toProcess = images.slice(0, canEnhance);
+  const theme = session.pendingTheme || STUDIO_SCENE;
 
-  try {
-    const media = await downloadWhatsAppMedia(imageId);
-    const enhanced = await enhanceProductImage(media.base64, media.mimeType, theme);
-    await sendEnhancedImage(from, enhanced.base64, enhanced.mimeType);
+  // Process in parallel but surface per-image failures individually
+  const results = await Promise.all(
+    toProcess.map(async (img) => {
+      try {
+        // Charge credit per image
+        let usedPool: "weekly" | "purchased" | null = null;
+        if (session.isVerified && session.userId) {
+          const usage = await consumeWeeklyAICredit(prisma, session.userId);
+          usedPool = usage.usedPool;
+        } else {
+          await prisma.whatsAppSession.update({
+            where: { id: session.id },
+            data: { creditsUsed: { increment: 1 } },
+          });
+          usedPool = null;
+        }
 
-    await prisma.whatsAppSession.update({
-      where: { id: session.id },
-      data: {
-        state: exhausted ? STATES.EXHAUSTED : STATES.POST_ENHANCEMENT,
-        lastSourceImage: media.base64,
-        lastSourceMimeType: media.mimeType,
-      },
-    });
+        const media = await downloadWhatsAppMedia(img.imageId);
+        const enhanced = await enhanceProductImage(media.base64, media.mimeType, theme);
+        return { ok: true as const, media, enhanced, usedPool };
+      } catch (err) {
+        console.error("[WhatsApp] batch item failed:", (err as Error)?.message || err);
+        return { ok: false as const, error: (err as Error)?.message || "Enhancement failed" };
+      }
+    }),
+  );
 
-    let message = `✅ Done! Credits remaining: *${remainingAfter}*.`;
-    if (remainingAfter === 0) {
-      message = `✅ Done! That was your last free enhancement.\n\nSign up for unlimited weekly credits:\n${SIGNUP_URL}\n\nAlready have an account? Type /start.`;
-    } else if (remainingAfter <= 2) {
-      message = `✅ Done! You have *${remainingAfter}* free enhancement${remainingAfter === 1 ? "" : "s"} left.`;
+  // Refund any credits for failed items
+  for (const r of results) {
+    if (!r.ok) {
+      if (session.isVerified && session.userId && r !== undefined && "usedPool" in r && r.usedPool) {
+        // Can't happen here because failed path doesn't have usedPool, but keep the guard.
+      } else if (!session.isVerified) {
+        await prisma.whatsAppSession.update({
+          where: { id: session.id },
+          data: { creditsUsed: { decrement: 1 } },
+        });
+      }
     }
-    await sendWhatsAppTextMessage({ to: from, body: message });
-    if (!exhausted) {
-      await sendRefinementButtons(from);
-    }
-  } catch (err) {
-    console.error("WhatsApp guest enhancement error:", err);
-    await prisma.whatsAppSession.update({
-      where: { id: session.id },
-      data: { creditsUsed: { decrement: 1 }, state: STATES.AWAITING_GUEST_IMAGE },
-    });
-    await sendWhatsAppTextMessage({ to: from, body: "Sorry, we could not enhance your image right now. Please try again." });
   }
+
+  // Send each successful image with a numbered caption so users know which is which
+  let successCount = 0;
+  let lastSourceImage: string | null = null;
+  let lastSourceMimeType: string | null = null;
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (!r.ok) continue;
+    const caption = toProcess.length > 1 ? `Image ${i + 1} of ${toProcess.length}` : undefined;
+    try {
+      const wamid = await sendEnhancedImage(from, r.enhanced.base64, r.enhanced.mimeType, caption);
+      successCount++;
+      lastSourceImage = r.media.base64;
+      lastSourceMimeType = r.media.mimeType;
+
+      if (wamid) {
+        await prisma.whatsAppEnhancement.create({
+          data: {
+            sessionId: session.id,
+            outboundWamid: wamid,
+            sourceImage: r.media.base64,
+            sourceMimeType: r.media.mimeType,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("[WhatsApp] send enhanced image failed:", (err as Error)?.message || err);
+    }
+  }
+
+  // Update session — refinement fallback uses the last image in the batch
+  await prisma.whatsAppSession.update({
+    where: { id: session.id },
+    data: {
+      state: session.isVerified ? STATES.POST_ENHANCEMENT : STATES.POST_ENHANCEMENT,
+      lastSourceImage: lastSourceImage ?? session.lastSourceImage,
+      lastSourceMimeType: lastSourceMimeType ?? session.lastSourceMimeType,
+    },
+  });
+
+  // Summary
+  const failureCount = results.length - successCount;
+  const summaryParts: string[] = [];
+  if (successCount > 0) summaryParts.push(`✅ ${successCount} enhanced`);
+  if (failureCount > 0) summaryParts.push(`⚠️ ${failureCount} failed`);
+  if (skipped > 0) summaryParts.push(`⏭️ ${skipped} skipped (no credits)`);
+
+  let footer = "\n\n💡 *Reply* to any image above to refine just that one, or type /new to start over.";
+  if (session.isVerified && session.userId) {
+    try {
+      const balance = await getAICredits(prisma, session.userId);
+      footer = `\n\n💳 Credits left: ${balance.weeklyCredits} weekly${balance.purchasedCredits > 0 ? ` + ${balance.purchasedCredits} purchased` : ""}.${footer}`;
+    } catch { /* non-critical */ }
+  } else {
+    const fresh = await prisma.whatsAppSession.findUnique({
+      where: { id: session.id },
+      select: { creditsUsed: true, creditsLimit: true },
+    });
+    if (fresh) {
+      const rem = Math.max(0, fresh.creditsLimit - fresh.creditsUsed);
+      footer = `\n\n💳 Free enhancements left: ${rem}.${footer}`;
+      if (rem === 0) {
+        await prisma.whatsAppSession.update({ where: { id: session.id }, data: { state: STATES.EXHAUSTED } });
+      }
+    }
+  }
+
+  await sendWhatsAppTextMessage({
+    to: from,
+    body: `${summaryParts.join(" · ") || "Done"}${footer}`,
+  });
 }
 
-async function handleRefinement(session: SessionRow, instruction: string, from: string): Promise<void> {
-  if (!session.lastSourceImage || !session.lastSourceMimeType) {
+// Backwards-compatible wrappers (some callsites still use these names)
+async function handleVerifiedImageEnhancement(session: SessionRow, imageId: string, from: string): Promise<void> {
+  await enqueueImage(session, imageId, from);
+}
+async function handleGuestImageEnhancement(session: SessionRow, imageId: string, from: string): Promise<void> {
+  await enqueueImage(session, imageId, from);
+}
+
+async function handleRefinement(
+  session: SessionRow,
+  instruction: string,
+  from: string,
+  replyToWamid?: string,
+): Promise<void> {
+  // Resolve source image: prefer the specific image the user replied to,
+  // otherwise fall back to the most recent enhancement in this session.
+  let sourceImage = session.lastSourceImage;
+  let sourceMimeType = session.lastSourceMimeType;
+
+  if (replyToWamid) {
+    const quoted = await prisma.whatsAppEnhancement.findUnique({
+      where: { outboundWamid: replyToWamid },
+    });
+    if (quoted && quoted.sessionId === session.id) {
+      sourceImage = quoted.sourceImage;
+      sourceMimeType = quoted.sourceMimeType;
+    }
+    // If the reply is to something that isn't one of our enhancements,
+    // silently fall back to lastSource below.
+  }
+
+  if (!sourceImage || !sourceMimeType) {
     await sendWhatsAppTextMessage({
       to: from,
       body: "I don't have the previous image anymore. Send a new product photo to start fresh.",
@@ -804,10 +957,22 @@ async function handleRefinement(session: SessionRow, instruction: string, from: 
   await sendWhatsAppTextMessage({ to: from, body: "🎨 Applying your refinement... one moment." });
 
   try {
-    const refined = await refineProductImage(session.lastSourceImage, session.lastSourceMimeType, instruction);
-    await sendEnhancedImage(from, refined.base64, refined.mimeType);
+    const refined = await refineProductImage(sourceImage, sourceMimeType, instruction);
+    const outWamid = await sendEnhancedImage(from, refined.base64, refined.mimeType);
 
-    // Update lastSource to the refined image so follow-up refinements stack naturally
+    // Track the refined image so the user can reply-to-refine again
+    if (outWamid) {
+      await prisma.whatsAppEnhancement.create({
+        data: {
+          sessionId: session.id,
+          outboundWamid: outWamid,
+          sourceImage: refined.base64,
+          sourceMimeType: refined.mimeType,
+        },
+      });
+    }
+
+    // Update lastSource to the refined image so a non-reply follow-up still refines the latest
     await prisma.whatsAppSession.update({
       where: { id: session.id },
       data: {

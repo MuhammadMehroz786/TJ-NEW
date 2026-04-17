@@ -16,6 +16,9 @@ export interface IncomingWhatsAppMessage {
   imageId?: string;
   interactiveReplyId?: string;
   interactiveReplyTitle?: string;
+  // When the user replies (quotes) a previous message, this is the wamid
+  // of the message they're replying to.
+  contextMessageId?: string;
 }
 
 function getRequiredEnv(name: string): string {
@@ -143,14 +146,18 @@ export async function uploadWhatsAppMedia(base64: string, mimeType: string): Pro
   return data.id;
 }
 
-export async function sendWhatsAppImageById(params: { to: string; mediaId: string }): Promise<void> {
+/**
+ * Send an image by media ID. Returns the outgoing message wamid so callers
+ * can persist it for later "reply-to-this-image" refinement routing.
+ */
+export async function sendWhatsAppImageById(params: { to: string; mediaId: string; caption?: string }): Promise<string | null> {
   const token = getRequiredEnv("WHATSAPP_TOKEN");
   const url = getGraphApiUrl();
-  const payload = {
+  const payload: Record<string, unknown> = {
     messaging_product: "whatsapp",
     to: params.to,
     type: "image",
-    image: { id: params.mediaId },
+    image: params.caption ? { id: params.mediaId, caption: params.caption } : { id: params.mediaId },
   };
 
   const response = await fetch(url, {
@@ -165,6 +172,8 @@ export async function sendWhatsAppImageById(params: { to: string; mediaId: strin
   if (!response.ok) {
     throw new Error(`WhatsApp image send failed: ${await response.text()}`);
   }
+  const data = (await response.json()) as { messages?: Array<{ id: string }> };
+  return data.messages?.[0]?.id || null;
 }
 
 export function extractIncomingMessages(payload: any): IncomingWhatsAppMessage[] {
@@ -186,6 +195,7 @@ export function extractIncomingMessages(payload: any): IncomingWhatsAppMessage[]
           imageId: message?.image?.id,
           interactiveReplyId: message?.interactive?.button_reply?.id || message?.interactive?.list_reply?.id,
           interactiveReplyTitle: message?.interactive?.button_reply?.title || message?.interactive?.list_reply?.title,
+          contextMessageId: message?.context?.id,
         });
       }
     }

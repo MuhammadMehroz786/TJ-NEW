@@ -291,9 +291,26 @@ model WhatsAppSession {
   updatedAt          DateTime  @updatedAt
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  enhancements WhatsAppEnhancement[]
 
   @@index([state, lastMessageAt])
   @@index([userId])
+}
+
+// Tracks every enhancement the bot sent to a merchant, keyed by the outbound
+// WhatsApp message ID. When the user replies (quotes) that image, we look up
+// the original source to refine against.
+model WhatsAppEnhancement {
+  id              String   @id @default(uuid())
+  sessionId       String
+  outboundWamid   String   @unique
+  sourceImage     String   @db.Text
+  sourceMimeType  String
+  createdAt       DateTime @default(now())
+
+  session WhatsAppSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
 }
 
 model CreditPurchase {
