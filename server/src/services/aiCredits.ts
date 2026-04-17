@@ -24,10 +24,12 @@ export class AICreditError extends Error {
  *   2. Purchased credits (purchasedCredits) drain after weekly is 0
  * Weekly credits auto-reset to 50 on a new week — purchased credits are NEVER reset.
  */
+export type CreditPool = "weekly" | "purchased";
+
 export async function consumeWeeklyAICredit(
   prisma: PrismaClient,
   userId: string
-): Promise<{ weeklyCredits: number; purchasedCredits: number; totalCredits: number; resetWeek: string }> {
+): Promise<{ weeklyCredits: number; purchasedCredits: number; totalCredits: number; resetWeek: string; usedPool: CreditPool }> {
   const currentWeekKey = getMondayKeyUTC();
 
   return prisma.$transaction(async (tx) => {
@@ -57,6 +59,7 @@ export async function consumeWeeklyAICredit(
     // Priority: drain weekly first, then purchased
     let updatedWeekly = weeklyCredits;
     let updatedPurchased = purchasedCredits;
+    let usedPool: CreditPool;
 
     if (weeklyCredits > 0) {
       const updated = await tx.user.update({
@@ -66,6 +69,7 @@ export async function consumeWeeklyAICredit(
       });
       updatedWeekly = updated.aiCredits;
       updatedPurchased = updated.purchasedCredits;
+      usedPool = "weekly";
     } else {
       const updated = await tx.user.update({
         where: { id: userId },
@@ -74,6 +78,7 @@ export async function consumeWeeklyAICredit(
       });
       updatedWeekly = updated.aiCredits;
       updatedPurchased = updated.purchasedCredits;
+      usedPool = "purchased";
     }
 
     return {
@@ -81,8 +86,31 @@ export async function consumeWeeklyAICredit(
       purchasedCredits: updatedPurchased,
       totalCredits: updatedWeekly + updatedPurchased,
       resetWeek: currentWeekKey,
+      usedPool,
     };
   });
+}
+
+/**
+ * Refund 1 credit back to the pool it was drained from.
+ * Use this when an operation that consumed a credit fails partway through
+ * (e.g. Gemini rejects the image). Best-effort: logs on failure but doesn't throw.
+ */
+export async function refundOneCredit(
+  prisma: PrismaClient,
+  userId: string,
+  pool: CreditPool,
+): Promise<void> {
+  try {
+    await prisma.user.update({
+      where: { id: userId },
+      data: pool === "weekly"
+        ? { aiCredits: { increment: 1 } }
+        : { purchasedCredits: { increment: 1 } },
+    });
+  } catch (err) {
+    console.error(`Failed to refund credit (pool=${pool}, userId=${userId}):`, err);
+  }
 }
 
 /**

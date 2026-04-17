@@ -5,7 +5,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import crypto from "crypto";
 import { authenticate, AuthRequest, requireRole } from "../middleware/auth";
-import { AICreditError, consumeWeeklyAICredit } from "../services/aiCredits";
+import { AICreditError, consumeWeeklyAICredit, refundOneCredit } from "../services/aiCredits";
 import { refineProductImage } from "../services/imageRefinement";
 
 const router = Router();
@@ -188,9 +188,10 @@ router.post("/enhance", async (req: AuthRequest, res: Response): Promise<void> =
 
     const creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
 
-    const sceneName = background && backgroundScenes[background] ? background : "studio";
-    const sceneDescription = backgroundScenes[sceneName];
-    const fixedPrompt = `You are a professional e-commerce product photographer. Edit this product image following these strict rules:
+    try {
+      const sceneName = background && backgroundScenes[background] ? background : "studio";
+      const sceneDescription = backgroundScenes[sceneName];
+      const fixedPrompt = `You are a professional e-commerce product photographer. Edit this product image following these strict rules:
 
 PRODUCT PRESERVATION (most important):
 - Keep the product EXACTLY as it is — same shape, size, proportions, colors, textures, labels, and details.
@@ -219,72 +220,86 @@ STRICT RULES:
 - Do NOT crop or change the framing — keep the product centered and properly composed.
 - The result must look like an authentic photograph, not a composite or collage.`;
 
-    const parsedInput = parseBase64Image(image);
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const parsedInput = parseBase64Image(image);
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
-      contents: [{ inlineData: { mimeType: parsedInput.mimeType, data: parsedInput.base64 } }, fixedPrompt],
-      config: { responseModalities: ["image", "text"] },
-    });
-
-    const parts = response.candidates?.[0]?.content?.parts;
-    if (!parts) throw new Error("No response parts returned.");
-
-    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
-    if (!imagePart?.inlineData?.data) throw new Error("No image data in response.");
-
-    const outputMimeType = imagePart.inlineData.mimeType || "image/png";
-    const extMap: Record<string, string> = {
-      "image/png": "png",
-      "image/jpeg": "jpg",
-      "image/webp": "webp",
-    };
-    const outputExt = extMap[outputMimeType] || "png";
-    const outputBase64 = imagePart.inlineData.data as string;
-
-    const randomId = crypto.randomUUID();
-    const relativePath = path.join("ai-studio", req.auth!.userId, `${Date.now()}-${randomId}.${outputExt}`);
-    const normalizedPath = relativePath.replaceAll("\\", "/");
-    await saveBase64ToStorage(outputBase64, normalizedPath);
-
-    const imageUrl = `/media/${normalizedPath}`;
-    let selectedFolderId: string | null = null;
-    if (folderId) {
-      const folder = await prisma.aiStudioFolder.findFirst({
-        where: { id: folderId, userId: req.auth!.userId },
-        select: { id: true },
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-image",
+        contents: [{ inlineData: { mimeType: parsedInput.mimeType, data: parsedInput.base64 } }, fixedPrompt],
+        config: { responseModalities: ["image", "text"] },
       });
-      if (folder) selectedFolderId = folder.id;
+
+      const parts = response.candidates?.[0]?.content?.parts;
+      if (!parts) throw new Error("No response parts returned.");
+
+      const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
+      if (!imagePart?.inlineData?.data) throw new Error("No image data in response.");
+
+      const outputMimeType = imagePart.inlineData.mimeType || "image/png";
+      const extMap: Record<string, string> = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/webp": "webp",
+      };
+      const outputExt = extMap[outputMimeType] || "png";
+      const outputBase64 = imagePart.inlineData.data as string;
+
+      const randomId = crypto.randomUUID();
+      const relativePath = path.join("ai-studio", req.auth!.userId, `${Date.now()}-${randomId}.${outputExt}`);
+      const normalizedPath = relativePath.replaceAll("\\", "/");
+      await saveBase64ToStorage(outputBase64, normalizedPath);
+
+      const imageUrl = `/media/${normalizedPath}`;
+      let selectedFolderId: string | null = null;
+      if (folderId) {
+        const folder = await prisma.aiStudioFolder.findFirst({
+          where: { id: folderId, userId: req.auth!.userId },
+          select: { id: true },
+        });
+        if (folder) selectedFolderId = folder.id;
+      }
+
+      const record = await prisma.aiStudioImage.create({
+        data: {
+          userId: req.auth!.userId,
+          folderId: selectedFolderId,
+          imagePath: normalizedPath,
+          imageUrl,
+          background: sceneName,
+        },
+        include: {
+          folder: { select: { id: true, name: true } },
+        },
+      });
+
+      res.status(201).json({
+        ...record,
+        remainingCredits: creditUsage.totalCredits,
+        weeklyCredits: creditUsage.weeklyCredits,
+        purchasedCredits: creditUsage.purchasedCredits,
+        creditsResetWeek: creditUsage.resetWeek,
+      });
+    } catch (innerErr: unknown) {
+      // Refund the credit that was consumed before the Gemini call failed
+      await refundOneCredit(prisma, req.auth!.userId, creditUsage.usedPool);
+      throw innerErr;
     }
-
-    const record = await prisma.aiStudioImage.create({
-      data: {
-        userId: req.auth!.userId,
-        folderId: selectedFolderId,
-        imagePath: normalizedPath,
-        imageUrl,
-        background: sceneName,
-      },
-      include: {
-        folder: { select: { id: true, name: true } },
-      },
-    });
-
-    res.status(201).json({
-      ...record,
-      remainingCredits: creditUsage.totalCredits,
-      weeklyCredits: creditUsage.weeklyCredits,
-      purchasedCredits: creditUsage.purchasedCredits,
-      creditsResetWeek: creditUsage.resetWeek,
-    });
   } catch (err: any) {
     if (err instanceof AICreditError) {
       res.status(err.status).json({ error: err.message, code: err.code });
       return;
     }
     console.error("AI Studio enhance error:", err);
-    res.status(500).json({ error: err.message || "Failed to enhance image", code: "ENHANCE_ERROR" });
+    const message = err?.message || "";
+    // Gemini rejections are typically 400-class on their end; surface a useful message
+    if (/Unable to process input image|INVALID_ARGUMENT|input image/i.test(message)) {
+      res.status(400).json({
+        error: "We couldn't process that image. Try a different file (JPEG or PNG, at least 200×200 px).",
+        code: "INVALID_IMAGE",
+      });
+      return;
+    }
+    res.status(500).json({ error: "Failed to enhance image", code: "ENHANCE_ERROR" });
   }
 });
 
@@ -341,68 +356,81 @@ router.post("/refine", async (req: AuthRequest, res: Response): Promise<void> =>
 
     const creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
 
-    const refined = await refineProductImage(
-      sourceBuffer.toString("base64"),
-      sourceMimeType,
-      trimmedInstruction,
-    );
+    try {
+      const refined = await refineProductImage(
+        sourceBuffer.toString("base64"),
+        sourceMimeType,
+        trimmedInstruction,
+      );
 
-    const outputMimeType = refined.mimeType;
-    const extMap: Record<string, string> = {
-      "image/png": "png",
-      "image/jpeg": "jpg",
-      "image/webp": "webp",
-    };
-    const outputExt = extMap[outputMimeType] || "png";
+      const outputMimeType = refined.mimeType;
+      const extMap: Record<string, string> = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/webp": "webp",
+      };
+      const outputExt = extMap[outputMimeType] || "png";
 
-    const randomId = crypto.randomUUID();
-    const relativePath = path.join("ai-studio", req.auth!.userId, `${Date.now()}-${randomId}.${outputExt}`);
-    const normalizedPath = relativePath.replaceAll("\\", "/");
-    await saveBase64ToStorage(refined.base64, normalizedPath);
+      const randomId = crypto.randomUUID();
+      const relativePath = path.join("ai-studio", req.auth!.userId, `${Date.now()}-${randomId}.${outputExt}`);
+      const normalizedPath = relativePath.replaceAll("\\", "/");
+      await saveBase64ToStorage(refined.base64, normalizedPath);
 
-    const imageUrl = `/media/${normalizedPath}`;
+      const imageUrl = `/media/${normalizedPath}`;
 
-    // Target folder: explicit folderId override > source image folder > null
-    let targetFolderId: string | null = null;
-    if (folderId === null) {
-      targetFolderId = null;
-    } else if (typeof folderId === "string" && folderId) {
-      const folder = await prisma.aiStudioFolder.findFirst({
-        where: { id: folderId, userId: req.auth!.userId },
-        select: { id: true },
+      // Target folder: explicit folderId override > source image folder > null
+      let targetFolderId: string | null = null;
+      if (folderId === null) {
+        targetFolderId = null;
+      } else if (typeof folderId === "string" && folderId) {
+        const folder = await prisma.aiStudioFolder.findFirst({
+          where: { id: folderId, userId: req.auth!.userId },
+          select: { id: true },
+        });
+        if (folder) targetFolderId = folder.id;
+      } else {
+        targetFolderId = sourceImage.folderId;
+      }
+
+      const record = await prisma.aiStudioImage.create({
+        data: {
+          userId: req.auth!.userId,
+          folderId: targetFolderId,
+          imagePath: normalizedPath,
+          imageUrl,
+          background: sourceImage.background,
+        },
+        include: {
+          folder: { select: { id: true, name: true } },
+        },
       });
-      if (folder) targetFolderId = folder.id;
-    } else {
-      targetFolderId = sourceImage.folderId;
+
+      res.status(201).json({
+        ...record,
+        remainingCredits: creditUsage.totalCredits,
+        weeklyCredits: creditUsage.weeklyCredits,
+        purchasedCredits: creditUsage.purchasedCredits,
+        creditsResetWeek: creditUsage.resetWeek,
+      });
+    } catch (innerErr: unknown) {
+      await refundOneCredit(prisma, req.auth!.userId, creditUsage.usedPool);
+      throw innerErr;
     }
-
-    const record = await prisma.aiStudioImage.create({
-      data: {
-        userId: req.auth!.userId,
-        folderId: targetFolderId,
-        imagePath: normalizedPath,
-        imageUrl,
-        background: sourceImage.background,
-      },
-      include: {
-        folder: { select: { id: true, name: true } },
-      },
-    });
-
-    res.status(201).json({
-      ...record,
-      remainingCredits: creditUsage.totalCredits,
-      weeklyCredits: creditUsage.weeklyCredits,
-      purchasedCredits: creditUsage.purchasedCredits,
-      creditsResetWeek: creditUsage.resetWeek,
-    });
   } catch (err: unknown) {
     if (err instanceof AICreditError) {
       res.status(err.status).json({ error: err.message, code: err.code });
       return;
     }
     console.error("AI Studio refine error:", err);
-    res.status(500).json({ error: (err as Error)?.message || "Failed to refine image", code: "REFINE_ERROR" });
+    const message = (err as Error)?.message || "";
+    if (/Unable to process input image|INVALID_ARGUMENT|input image/i.test(message)) {
+      res.status(400).json({
+        error: "We couldn't refine that image — try a different instruction or a new image.",
+        code: "INVALID_IMAGE",
+      });
+      return;
+    }
+    res.status(500).json({ error: "Failed to refine image", code: "REFINE_ERROR" });
   }
 });
 

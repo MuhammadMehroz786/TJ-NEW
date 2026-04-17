@@ -278,6 +278,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       const now = new Date();
       const answer = normalizeAnswer(message.text, message.interactiveReplyTitle);
 
+      try {
       let session = await prisma.whatsAppSession.findUnique({ where: { phoneNumber: from } });
 
       if (!session) {
@@ -603,9 +604,23 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       // Fallback
       await resetSessionToWelcome(session.id, false, 0);
       await sendWelcomeMessage(from);
+      } catch (msgErr) {
+        const err = msgErr as Error;
+        console.error(
+          `[WhatsApp] message handling failed`,
+          JSON.stringify({
+            phoneNumber: from,
+            messageType: message.type,
+            interactiveReplyId: message.interactiveReplyId,
+            answer: answer.slice(0, 40),
+            error: err?.message || String(err),
+          }),
+        );
+      }
     }
   } catch (error) {
-    console.error("WhatsApp webhook error:", error);
+    const err = error as Error;
+    console.error(`[WhatsApp] webhook batch failed: ${err?.message || String(err)}`);
   }
 });
 
