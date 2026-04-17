@@ -7,15 +7,18 @@ import { getAICredits } from "../services/aiCredits";
 const router = Router();
 const prisma = new PrismaClient();
 
-let stripeInstance: Stripe | null = null;
-function getStripe(): Stripe {
+let stripeInstance: ReturnType<typeof createStripeClient> | null = null;
+function createStripeClient() {
+  return new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: "2026-03-25.dahlia",
+  });
+}
+function getStripe() {
   if (!stripeInstance) {
     if (!process.env.STRIPE_SECRET_KEY) {
       throw new Error("STRIPE_SECRET_KEY is not configured");
     }
-    stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: "2026-03-25.dahlia",
-    });
+    stripeInstance = createStripeClient();
   }
   return stripeInstance;
 }
