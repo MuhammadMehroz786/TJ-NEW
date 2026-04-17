@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 
 export function buildRefinementPrompt(instruction: string): string {
-  return `You are a professional e-commerce product photographer refining a product image based on client feedback.
+  return `You are a professional e-commerce product photographer refining a product image based on client feedback. Think of this as a careful, subtle edit — not a full regeneration.
 
 PRODUCT PRESERVATION (most important):
 - Keep the product EXACTLY as it is — same shape, size, proportions, colors, textures, labels, and details.
@@ -11,15 +11,19 @@ PRODUCT PRESERVATION (most important):
 CLIENT REFINEMENT REQUEST:
 ${instruction}
 
-APPLY THE REFINEMENT:
-- Interpret the request as an edit to the existing composition (background, lighting, color tone, framing, shadows).
-- Keep everything else from the current image consistent.
-- Result must look photorealistic.
+APPLY THE REFINEMENT SUBTLY:
+- Interpret the request as a NUANCED edit to the existing composition (background, lighting, color tone, framing, shadows).
+- Make only the change the client asked for — do not alter anything else.
+- Keep the overall exposure balanced. Never flood the image with white light, blow out highlights, wash out colors, or reduce contrast.
+- Preserve the original dynamic range, existing shadows, and color saturation unless explicitly asked to change them.
+- If adjusting lighting: change the QUALITY of light (softer, warmer, more directional, better shadow detail) — not its brightness level.
+- Result must look like the same photograph after a professional color-grade, not a different image.
 
 STRICT RULES:
 - Do NOT add text, watermarks, logos, or branding.
 - Do NOT add extra objects, props, or decorations unless explicitly requested.
 - Do NOT crop or change the framing unless explicitly requested.
+- Do NOT desaturate, over-brighten, or wash out the image.
 - The result must look like an authentic photograph, not a composite.`;
 }
 

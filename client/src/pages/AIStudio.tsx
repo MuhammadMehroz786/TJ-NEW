@@ -426,9 +426,10 @@ export function AIStudio() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { label: "Change background", value: "Replace the background with a different professional e-commerce scene while keeping the product identical." },
-                    { label: "Brighter lighting",  value: "Improve the lighting — brighter, cleaner, evenly lit with soft natural shadows." },
-                    { label: "Warmer tones",       value: "Shift the color tone to be warmer and more inviting, while keeping the product colors accurate." },
+                    { label: "Change background", value: "Replace ONLY the background with a different professional e-commerce scene. Keep the product, its lighting, and the existing exposure level exactly the same." },
+                    { label: "Softer lighting",   value: "Make the lighting softer and more diffused — add a gentle key light with feathered edges and cleaner soft shadows beneath the product. Do NOT increase overall brightness, do NOT wash out the image, and do NOT reduce contrast. Preserve the existing exposure and color saturation." },
+                    { label: "Warmer tones",      value: "Apply a subtle warm color grade (lift shadows slightly toward amber, add a touch of warmth to highlights). Keep the product's true colors accurate. Do NOT change exposure or saturation." },
+                    { label: "Deeper shadows",    value: "Deepen the contact shadows beneath the product for more grounded realism. Keep everything else — product, background, overall exposure — identical." },
                   ].map((chip) => (
                     <button
                       key={chip.label}

@@ -143,15 +143,15 @@ async function sendRefinementButtons(to: string): Promise<void> {
     body: "Want to tweak it? Pick a quick refinement or type your own (e.g. _brighter lighting_, _closer crop_, _warmer tones_).",
     buttons: [
       { id: "refine_bg",    title: "Change background" },
-      { id: "refine_light", title: "Fix lighting" },
+      { id: "refine_light", title: "Softer lighting" },
       { id: "refine_new",   title: "New image" },
     ],
   });
 }
 
 const QUICK_REFINEMENTS: Record<string, string> = {
-  refine_bg:    "Replace the background with a different scene that still looks professional for e-commerce.",
-  refine_light: "Improve the lighting — make it brighter, cleaner, and more evenly lit with soft natural shadows.",
+  refine_bg:    "Replace ONLY the background with a different professional e-commerce scene. Keep the product, its lighting, and the existing exposure level exactly the same.",
+  refine_light: "Make the lighting softer and more diffused — add a gentle key light with feathered edges and cleaner soft shadows beneath the product. Do NOT increase overall brightness, do NOT wash out the image, and do NOT reduce contrast. Preserve the existing exposure and color saturation.",
 };
 
 async function resetSessionToWelcome(sessionId: string, keepCredits: boolean, currentCreditsUsed: number): Promise<void> {
