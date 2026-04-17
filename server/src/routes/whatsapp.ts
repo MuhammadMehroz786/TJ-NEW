@@ -26,7 +26,7 @@ import { addImageToBatch, type PendingImage } from "../services/whatsappBatch";
 const router = Router();
 const prisma = new PrismaClient();
 
-const SIGNUP_URL = process.env.WHATSAPP_SIGNUP_URL || "https://tijarflow.com/signup";
+const SIGNUP_URL = process.env.WHATSAPP_SIGNUP_URL || "https://app.tijarflow.com/signup";
 
 const STATES = {
   AWAITING_ACCOUNT_ANSWER: "awaiting_account_answer",
