@@ -284,6 +284,7 @@ model WhatsAppSession {
   emailOtpExpiresAt  DateTime?
   otpAttempts        Int       @default(0)
   pendingTheme       String?
+  pendingImageIds    String[]  @default([])
   lastSourceImage    String?   @db.Text
   lastSourceMimeType String?
   lastMessageAt      DateTime  @default(now())

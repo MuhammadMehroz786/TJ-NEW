@@ -32,9 +32,9 @@ const STATES = {
   AWAITING_ACCOUNT_ANSWER: "awaiting_account_answer",
   AWAITING_EMAIL: "awaiting_email",
   AWAITING_OTP: "awaiting_otp",
-  AWAITING_GUEST_THEME: "awaiting_guest_theme",
   AWAITING_GUEST_IMAGE: "awaiting_guest_image",
   VERIFIED: "verified",
+  AWAITING_BATCH_THEME: "awaiting_batch_theme",
   POST_ENHANCEMENT: "post_enhancement",
   EXHAUSTED: "exhausted",
 } as const;
@@ -378,7 +378,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         } else {
           await sendWhatsAppTextMessage({
             to: from,
-            body: "✅ Send a product image and I'll enhance it with a professional studio background.\n\nType /help for commands.",
+            body: "✅ Send your product image(s) — one or many. After I receive them I'll ask what theme to apply.\n\nType /help for commands.",
           });
         }
         continue;
@@ -451,7 +451,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           await prisma.whatsAppSession.update({
             where: { id: session.id },
             data: {
-              state: STATES.AWAITING_GUEST_THEME,
+              state: STATES.AWAITING_GUEST_IMAGE,
               creditsUsed: 0,
               creditsLimit: 5,
               isVerified: false,
@@ -462,9 +462,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             to: from,
             body:
               "Great! You get *5 free AI enhancements* to try. 🎨\n\n" +
-              "First, describe the *theme* or background you'd like for your product photos.\n\n" +
-              "Examples: _clean white studio_, _marble kitchen counter_, _outdoor sunny park_, _minimal black background_\n\n" +
-              "Send your theme as a text message.",
+              "Send me your product image(s) — one or many. After I receive them I'll ask what theme to apply.",
           });
           continue;
         }
@@ -616,16 +614,30 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
         await sendWhatsAppTextMessage({
           to: from,
-          body: `✅ Welcome back, ${user.name}! Your account is now linked.${creditsInfo}\n\nSend a product image to enhance it, or type /help for commands.`,
+          body: `✅ Welcome back, ${user.name}! Your account is now linked.${creditsInfo}\n\nSend your product image(s). After you're done I'll ask what theme to apply.`,
         });
         continue;
       }
 
-      if (session.state === STATES.AWAITING_GUEST_THEME) {
+      if (session.state === STATES.AWAITING_BATCH_THEME) {
+        // User may have sent another image while we were waiting — queue it
+        // and keep waiting for the theme text.
+        if (message.type === "image" && message.imageId) {
+          await prisma.whatsAppSession.update({
+            where: { id: session.id },
+            data: { pendingImageIds: [...session.pendingImageIds, message.imageId] },
+          });
+          await sendWhatsAppTextMessage({
+            to: from,
+            body: `✨ Added to your batch (${session.pendingImageIds.length + 1} total). Send the theme text to start enhancement.`,
+          });
+          continue;
+        }
+
         if (message.type !== "text" || !message.text) {
           await sendWhatsAppTextMessage({
             to: from,
-            body: "Please describe your theme as a text message. Example: _clean white studio background_",
+            body: "Please describe the theme as a text message. Example: _clean white studio background_",
           });
           continue;
         }
@@ -634,14 +646,24 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           await sendWhatsAppTextMessage({ to: from, body: "Please provide a more descriptive theme (at least 3 characters)." });
           continue;
         }
+        if (session.pendingImageIds.length === 0) {
+          // Shouldn't happen, but guard anyway
+          await prisma.whatsAppSession.update({
+            where: { id: session.id },
+            data: { state: session.isVerified ? STATES.VERIFIED : STATES.AWAITING_GUEST_IMAGE },
+          });
+          await sendWhatsAppTextMessage({
+            to: from,
+            body: "I don't have any pending images — please send an image first.",
+          });
+          continue;
+        }
         await prisma.whatsAppSession.update({
           where: { id: session.id },
-          data: { pendingTheme: theme, state: STATES.AWAITING_GUEST_IMAGE },
+          data: { pendingTheme: theme },
         });
-        await sendWhatsAppTextMessage({
-          to: from,
-          body: `Got it — theme saved: _${theme}_\n\nNow send your first product image! 📸 You have *${Math.max(0, session.creditsLimit - session.creditsUsed)}* free enhancements.`,
-        });
+        // Kick off processing now with the saved images + theme
+        await processBatch(session, session.pendingImageIds, theme, from);
         continue;
       }
 
@@ -697,35 +719,63 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
 /**
  * Enqueue an inbound image into the per-user batch window. First image gets
- * an ack message ("Got it! Send more or wait 5s…"); subsequent images are
- * added silently to avoid chat spam. After 5s of silence the batch is flushed.
+ * an ack message; subsequent images are added silently to avoid chat spam.
+ * After 5s of silence the batch is flushed — at which point we ASK for a
+ * theme and persist the image IDs to the session for the theme-handler to
+ * pick up.
  */
 async function enqueueImage(session: SessionRow, imageId: string, from: string): Promise<void> {
   const result = addImageToBatch(from, imageId, async (phoneNumber, images) => {
-    // Re-load the session at flush time — state may have changed since enqueue
     const freshSession = await prisma.whatsAppSession.findUnique({ where: { phoneNumber } });
     if (!freshSession) return;
-    await processBatch(freshSession, images, phoneNumber);
+    await askForBatchTheme(freshSession, images, phoneNumber);
   });
 
   if (result.newBatch) {
     await sendWhatsAppTextMessage({
       to: from,
-      body: "✨ Got your image! Send more if you want — I'll process them together after a few seconds of silence.",
+      body: "✨ Got your image! Send more if you want — I'll ask for the theme after a few seconds of silence.",
     });
   }
 }
 
 /**
- * Process a batch of queued images. Downloads, consumes credits (one per
- * image), enhances in parallel, sends results back, persists enhancement
- * records so follow-up replies can target a specific image.
+ * After the batch window closes, persist the pending image IDs and ask the
+ * user which theme/background to apply. The reply is caught by the
+ * AWAITING_BATCH_THEME state handler and triggers processBatch.
  */
-async function processBatch(session: SessionRow, images: PendingImage[], from: string): Promise<void> {
+async function askForBatchTheme(session: SessionRow, images: PendingImage[], from: string): Promise<void> {
   if (images.length === 0) return;
+  const imageIds = images.map((i) => i.imageId);
 
-  // Figure out how many we can afford. Guests and verified use different pools.
-  const total = images.length;
+  await prisma.whatsAppSession.update({
+    where: { id: session.id },
+    data: {
+      state: STATES.AWAITING_BATCH_THEME,
+      pendingImageIds: imageIds,
+    },
+  });
+
+  const count = images.length;
+  await sendWhatsAppTextMessage({
+    to: from,
+    body:
+      `Got ${count} image${count === 1 ? "" : "s"}! 📸\n\n` +
+      `What theme or background would you like?\n\n` +
+      `Examples:\n• _clean white studio_\n• _marble kitchen counter_\n• _outdoor sunset scene_\n• _minimal black background_\n\n` +
+      `Send your theme as a text message.`,
+  });
+}
+
+/**
+ * Process a batch of queued images with a specified theme. Downloads, consumes
+ * credits (one per image), enhances in parallel, sends results back, persists
+ * enhancement records so follow-up replies can target a specific image.
+ */
+async function processBatch(session: SessionRow, imageIds: string[], theme: string, from: string): Promise<void> {
+  if (imageIds.length === 0) return;
+
+  const total = imageIds.length;
   let canEnhance = total;
 
   if (session.isVerified && session.userId) {
@@ -766,14 +816,12 @@ async function processBatch(session: SessionRow, images: PendingImage[], from: s
       : `🎨 Enhancing ${canEnhance} image${canEnhance === 1 ? "" : "s"}... This may take a moment.`,
   });
 
-  const toProcess = images.slice(0, canEnhance);
-  const theme = session.pendingTheme || STUDIO_SCENE;
+  const toProcess = imageIds.slice(0, canEnhance);
 
   // Process in parallel but surface per-image failures individually
   const results = await Promise.all(
-    toProcess.map(async (img) => {
+    toProcess.map(async (imageId) => {
       try {
-        // Charge credit per image
         let usedPool: "weekly" | "purchased" | null = null;
         if (session.isVerified && session.userId) {
           const usage = await consumeWeeklyAICredit(prisma, session.userId);
@@ -783,10 +831,9 @@ async function processBatch(session: SessionRow, images: PendingImage[], from: s
             where: { id: session.id },
             data: { creditsUsed: { increment: 1 } },
           });
-          usedPool = null;
         }
 
-        const media = await downloadWhatsAppMedia(img.imageId);
+        const media = await downloadWhatsAppMedia(imageId);
         const enhanced = await enhanceProductImage(media.base64, media.mimeType, theme);
         return { ok: true as const, media, enhanced, usedPool };
       } catch (err) {
@@ -839,13 +886,15 @@ async function processBatch(session: SessionRow, images: PendingImage[], from: s
     }
   }
 
-  // Update session — refinement fallback uses the last image in the batch
+  // Update session — refinement fallback uses the last image in the batch.
+  // pendingImageIds is cleared so subsequent theme replies don't reprocess.
   await prisma.whatsAppSession.update({
     where: { id: session.id },
     data: {
-      state: session.isVerified ? STATES.POST_ENHANCEMENT : STATES.POST_ENHANCEMENT,
+      state: STATES.POST_ENHANCEMENT,
       lastSourceImage: lastSourceImage ?? session.lastSourceImage,
       lastSourceMimeType: lastSourceMimeType ?? session.lastSourceMimeType,
+      pendingImageIds: [],
     },
   });
 
