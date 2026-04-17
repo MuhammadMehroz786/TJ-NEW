@@ -198,7 +198,9 @@ async function handleSlashCommand(answer: string, from: string, session: Session
     case "/restart":
     case "/clear":
     case "/reset":
-      await resetSessionToWelcome(session.id, false, session.creditsUsed);
+      // Preserve the guest credit counter so users can't farm free credits by
+      // restarting. /logout is the only path that wipes the counter (below).
+      await resetSessionToWelcome(session.id, true, session.creditsUsed);
       await sendWelcomeMessage(from);
       return true;
 
@@ -448,12 +450,36 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         }
 
         if (answer === "no" || answer === "no, use free trial") {
+          // Do NOT reset creditsUsed. 5 free enhancements are lifetime per phone
+          // number — a guest who exhausted their trial can't re-trigger it by
+          // restarting and answering "No" again.
+          const alreadyUsed = session.creditsUsed;
+          const limit = session.creditsLimit || 5;
+          const remaining = Math.max(0, limit - alreadyUsed);
+          if (remaining <= 0) {
+            await prisma.whatsAppSession.update({
+              where: { id: session.id },
+              data: {
+                state: STATES.EXHAUSTED,
+                creditsLimit: limit,
+                isVerified: false,
+                userId: null,
+              },
+            });
+            await sendWhatsAppTextMessage({
+              to: from,
+              body:
+                `You've already used your 5 free enhancements. 🎉\n\n` +
+                `Sign up for TijarFlow to get 50 AI credits every week:\n${SIGNUP_URL}\n\n` +
+                `Or type /start and pick "Yes, I'm registered" to link an existing account.`,
+            });
+            continue;
+          }
           await prisma.whatsAppSession.update({
             where: { id: session.id },
             data: {
               state: STATES.AWAITING_GUEST_IMAGE,
-              creditsUsed: 0,
-              creditsLimit: 5,
+              creditsLimit: limit,
               isVerified: false,
               userId: null,
             },
@@ -461,8 +487,8 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           await sendWhatsAppTextMessage({
             to: from,
             body:
-              "Great! You get *5 free AI enhancements* to try. 🎨\n\n" +
-              "Send me your product image(s) — one or many. After I receive them I'll ask what theme to apply.",
+              `Great! You have *${remaining}* free AI enhancement${remaining === 1 ? "" : "s"} left. 🎨\n\n` +
+              `Send me your product image(s) — one or many. After I receive them I'll ask what theme to apply.`,
           });
           continue;
         }
