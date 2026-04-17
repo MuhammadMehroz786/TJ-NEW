@@ -277,6 +277,42 @@ router.post("/verify-session", authenticate, async (req: AuthRequest, res: Respo
   }
 });
 
+// ── POST /api/credits/grant ──────────────────────────────────────────────────
+// Dev-only endpoint to grant 50 purchased credits without Stripe. Gated by env
+// flag so it can be disabled in production once Stripe is wired up.
+router.post("/grant", authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
+  if (process.env.ENABLE_DEV_CREDIT_GRANT !== "true") {
+    res.status(403).json({ error: "Credit granting is disabled", code: "FORBIDDEN" });
+    return;
+  }
+
+  const GRANT_AMOUNT = 50;
+  try {
+    const userId = req.auth!.userId;
+    await prisma.$transaction(async (tx) => {
+      await tx.creditPurchase.create({
+        data: {
+          userId,
+          credits: GRANT_AMOUNT,
+          amount: 0,
+          stripeSessionId: `dev_grant_${Date.now()}_${userId}`,
+          status: "COMPLETED",
+        },
+      });
+      await tx.user.update({
+        where: { id: userId },
+        data: { purchasedCredits: { increment: GRANT_AMOUNT } },
+      });
+    });
+
+    const balance = await getAICredits(prisma, userId);
+    res.json({ granted: GRANT_AMOUNT, balance });
+  } catch (err) {
+    console.error("Grant error:", err);
+    res.status(500).json({ error: "Failed to grant credits", code: "INTERNAL_ERROR" });
+  }
+});
+
 // ── GET /api/credits/usage ───────────────────────────────────────────────────
 router.get("/usage", authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
