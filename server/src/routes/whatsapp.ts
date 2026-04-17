@@ -47,6 +47,58 @@ function isRestartTrigger(answer: string): boolean {
 const STUDIO_SCENE =
   "a clean pure white infinity-curve studio background with professional three-point lighting (key light, fill light, and rim light), creating soft natural shadows beneath and behind the product";
 
+function buildRefinementPrompt(instruction: string): string {
+  return `You are a professional e-commerce product photographer refining a product image based on client feedback.
+
+PRODUCT PRESERVATION (most important):
+- Keep the product EXACTLY as it is — same shape, size, proportions, colors, textures, labels, and details.
+- Do NOT alter, regenerate, distort, or artistically reinterpret the product.
+- Maintain the product's original scale and perspective angle.
+
+CLIENT REFINEMENT REQUEST:
+${instruction}
+
+APPLY THE REFINEMENT:
+- Interpret the request as an edit to the existing composition (background, lighting, color tone, framing, shadows).
+- Keep everything else from the current image consistent.
+- Result must look photorealistic.
+
+STRICT RULES:
+- Do NOT add text, watermarks, logos, or branding.
+- Do NOT add extra objects, props, or decorations unless explicitly requested.
+- Do NOT crop or change the framing unless explicitly requested.
+- The result must look like an authentic photograph, not a composite.`;
+}
+
+async function refineProductImage(
+  base64: string,
+  mimeType: string,
+  instruction: string,
+): Promise<{ base64: string; mimeType: string }> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = buildRefinementPrompt(instruction);
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash-image",
+    contents: [{ inlineData: { mimeType, data: base64 } }, prompt],
+    config: { responseModalities: ["image", "text"] },
+  });
+
+  const parts = response.candidates?.[0]?.content?.parts;
+  if (!parts) throw new Error("No response parts returned.");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
+  if (!imagePart?.inlineData) throw new Error("No image data in response.");
+
+  return {
+    base64: imagePart.inlineData.data as string,
+    mimeType: imagePart.inlineData.mimeType || "image/png",
+  };
+}
+
 function buildEnhancementPrompt(sceneDescription: string): string {
   return `You are a professional e-commerce product photographer. Edit this product image following these strict rules:
 
@@ -129,11 +181,29 @@ async function sendHelp(to: string): Promise<void> {
       "/start — Restart the conversation\n" +
       "/clear — Reset your session\n" +
       "/credits — Check your credit balance\n" +
+      "/new — Start fresh with a new image\n" +
       "/logout — Unlink your merchant account\n" +
       "/help — Show this menu\n\n" +
-      "Send a product image anytime and I'll enhance it!",
+      "Send a product image anytime and I'll enhance it! After each result you can request refinements like _make the background darker_ or _add warm lighting_.",
   });
 }
+
+async function sendRefinementButtons(to: string): Promise<void> {
+  await sendWhatsAppButtonsMessage({
+    to,
+    body: "Want to tweak it? Pick a quick refinement or type your own (e.g. _brighter lighting_, _closer crop_, _warmer tones_).",
+    buttons: [
+      { id: "refine_bg",    title: "Change background" },
+      { id: "refine_light", title: "Fix lighting" },
+      { id: "refine_new",   title: "New image" },
+    ],
+  });
+}
+
+const QUICK_REFINEMENTS: Record<string, string> = {
+  refine_bg:    "Replace the background with a different scene that still looks professional for e-commerce.",
+  refine_light: "Improve the lighting — make it brighter, cleaner, and more evenly lit with soft natural shadows.",
+};
 
 async function resetSessionToWelcome(sessionId: string, keepCredits: boolean, currentCreditsUsed: number): Promise<void> {
   await prisma.whatsAppSession.update({
@@ -176,6 +246,23 @@ async function handleSlashCommand(answer: string, from: string, session: Session
     case "/reset":
       await resetSessionToWelcome(session.id, false, session.creditsUsed);
       await sendWelcomeMessage(from);
+      return true;
+
+    case "/new":
+      if (session.isVerified) {
+        await prisma.whatsAppSession.update({
+          where: { id: session.id },
+          data: { state: STATES.VERIFIED, lastSourceImage: null, lastSourceMimeType: null },
+        });
+        await sendWhatsAppTextMessage({ to: from, body: "✨ Ready for a new image. Send your next product photo." });
+      } else {
+        await prisma.whatsAppSession.update({
+          where: { id: session.id },
+          data: { state: STATES.AWAITING_GUEST_IMAGE, lastSourceImage: null, lastSourceMimeType: null },
+        });
+        const remaining = Math.max(0, session.creditsLimit - session.creditsUsed);
+        await sendWhatsAppTextMessage({ to: from, body: `✨ Ready for a new image. Send your next product photo. *${remaining}* free enhancement${remaining === 1 ? "" : "s"} remaining.` });
+      }
       return true;
 
     case "/credits":
@@ -282,20 +369,52 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
       }
 
       if (session.state === STATES.POST_ENHANCEMENT) {
-        // Stage 2: refinement loop goes here. For now, any new image or text
-        // just kicks them back into the normal flow.
+        // New image always starts a fresh enhancement
         if (message.type === "image" && message.imageId) {
           if (session.isVerified) {
             await handleVerifiedImageEnhancement(session, message.imageId, from);
           } else {
             await handleGuestImageEnhancement(session, message.imageId, from);
           }
-        } else {
-          await sendWhatsAppTextMessage({
-            to: from,
-            body: "Refinements coming soon! For now, send another product image to enhance, or type /help.",
-          });
+          continue;
         }
+
+        // Quick-reply button → canned refinement instruction
+        const buttonId = message.interactiveReplyId;
+        if (buttonId === "refine_new") {
+          if (session.isVerified) {
+            await prisma.whatsAppSession.update({
+              where: { id: session.id },
+              data: { state: STATES.VERIFIED, lastSourceImage: null, lastSourceMimeType: null },
+            });
+            await sendWhatsAppTextMessage({ to: from, body: "✨ Send your next product image." });
+          } else {
+            await prisma.whatsAppSession.update({
+              where: { id: session.id },
+              data: { state: STATES.AWAITING_GUEST_IMAGE, lastSourceImage: null, lastSourceMimeType: null },
+            });
+            const remaining = Math.max(0, session.creditsLimit - session.creditsUsed);
+            await sendWhatsAppTextMessage({ to: from, body: `✨ Send your next product image. *${remaining}* free enhancement${remaining === 1 ? "" : "s"} remaining.` });
+          }
+          continue;
+        }
+        if (buttonId && QUICK_REFINEMENTS[buttonId]) {
+          await handleRefinement(session, QUICK_REFINEMENTS[buttonId], from);
+          continue;
+        }
+
+        // Free-text refinement
+        if (message.type === "text" && message.text) {
+          const instruction = message.text.trim();
+          if (instruction.length < 3) {
+            await sendWhatsAppTextMessage({ to: from, body: "Please describe the refinement in a bit more detail (at least 3 characters)." });
+            continue;
+          }
+          await handleRefinement(session, instruction, from);
+          continue;
+        }
+
+        await sendWhatsAppTextMessage({ to: from, body: "Type a refinement (e.g. _brighter_), tap a button, or send a new image. /new to start over." });
         continue;
       }
 
@@ -560,16 +679,17 @@ async function handleVerifiedImageEnhancement(session: SessionRow, imageId: stri
       },
     });
 
-    let creditMsg = "✅ Done! Send another image anytime, or type /help for commands.";
+    let creditMsg = "✅ Done!";
     if (session.userId) {
       try {
         const credits = await getAICredits(prisma, session.userId);
-        creditMsg = `✅ Done! Credits remaining: ${credits.weeklyCredits} weekly${credits.purchasedCredits > 0 ? ` + ${credits.purchasedCredits} purchased` : ""}.\n\nSend another image or type /help.`;
+        creditMsg = `✅ Done! Credits remaining: ${credits.weeklyCredits} weekly${credits.purchasedCredits > 0 ? ` + ${credits.purchasedCredits} purchased` : ""}.`;
       } catch {
         // non-critical
       }
     }
     await sendWhatsAppTextMessage({ to: from, body: creditMsg });
+    await sendRefinementButtons(from);
   } catch (err) {
     if (err instanceof AICreditError) {
       await sendWhatsAppTextMessage({
@@ -609,13 +729,16 @@ async function handleGuestImageEnhancement(session: SessionRow, imageId: string,
       },
     });
 
-    let message = `✅ Done! Credits remaining: *${remainingAfter}*. Send another image or type /help.`;
+    let message = `✅ Done! Credits remaining: *${remainingAfter}*.`;
     if (remainingAfter === 0) {
       message = `✅ Done! That was your last free enhancement.\n\nSign up for unlimited weekly credits:\n${SIGNUP_URL}\n\nAlready have an account? Type /start.`;
     } else if (remainingAfter <= 2) {
-      message = `✅ Done! You have *${remainingAfter}* free enhancement${remainingAfter === 1 ? "" : "s"} left.\n\nUpgrade: ${SIGNUP_URL}`;
+      message = `✅ Done! You have *${remainingAfter}* free enhancement${remainingAfter === 1 ? "" : "s"} left.`;
     }
     await sendWhatsAppTextMessage({ to: from, body: message });
+    if (!exhausted) {
+      await sendRefinementButtons(from);
+    }
   } catch (err) {
     console.error("WhatsApp guest enhancement error:", err);
     await prisma.whatsAppSession.update({
@@ -623,6 +746,103 @@ async function handleGuestImageEnhancement(session: SessionRow, imageId: string,
       data: { creditsUsed: { decrement: 1 }, state: STATES.AWAITING_GUEST_IMAGE },
     });
     await sendWhatsAppTextMessage({ to: from, body: "Sorry, we could not enhance your image right now. Please try again." });
+  }
+}
+
+async function handleRefinement(session: SessionRow, instruction: string, from: string): Promise<void> {
+  if (!session.lastSourceImage || !session.lastSourceMimeType) {
+    await sendWhatsAppTextMessage({
+      to: from,
+      body: "I don't have the previous image anymore. Send a new product photo to start fresh.",
+    });
+    return;
+  }
+
+  // Credit check + consume
+  if (session.isVerified && session.userId) {
+    try {
+      await consumeWeeklyAICredit(prisma, session.userId);
+    } catch (err) {
+      if (err instanceof AICreditError) {
+        await sendWhatsAppTextMessage({
+          to: from,
+          body: `⚠️ You've used all your AI credits for this week. They reset every Monday.\n\nVisit ${SIGNUP_URL} to purchase more credits.`,
+        });
+        return;
+      }
+      throw err;
+    }
+  } else {
+    const remaining = Math.max(0, session.creditsLimit - session.creditsUsed);
+    if (remaining <= 0) {
+      await prisma.whatsAppSession.update({
+        where: { id: session.id },
+        data: { state: STATES.EXHAUSTED },
+      });
+      await sendWhatsAppTextMessage({
+        to: from,
+        body: `Your 5 free enhancements are used up! 🎉\n\nSign up for 50 weekly credits:\n${SIGNUP_URL}`,
+      });
+      return;
+    }
+    await prisma.whatsAppSession.update({
+      where: { id: session.id },
+      data: { creditsUsed: { increment: 1 } },
+    });
+  }
+
+  await sendWhatsAppTextMessage({ to: from, body: "🎨 Applying your refinement... one moment." });
+
+  try {
+    const refined = await refineProductImage(session.lastSourceImage, session.lastSourceMimeType, instruction);
+    await sendEnhancedImage(from, refined.base64, refined.mimeType);
+
+    // Update lastSource to the refined image so follow-up refinements stack naturally
+    await prisma.whatsAppSession.update({
+      where: { id: session.id },
+      data: {
+        state: STATES.POST_ENHANCEMENT,
+        lastSourceImage: refined.base64,
+        lastSourceMimeType: refined.mimeType,
+      },
+    });
+
+    // Balance summary
+    let summary = "✅ Refinement applied.";
+    if (session.isVerified && session.userId) {
+      try {
+        const credits = await getAICredits(prisma, session.userId);
+        summary = `✅ Refinement applied. Credits remaining: ${credits.weeklyCredits} weekly${credits.purchasedCredits > 0 ? ` + ${credits.purchasedCredits} purchased` : ""}.`;
+      } catch {
+        // non-critical
+      }
+    } else {
+      const fresh = await prisma.whatsAppSession.findUnique({
+        where: { id: session.id },
+        select: { creditsUsed: true, creditsLimit: true },
+      });
+      if (fresh) {
+        const remaining = Math.max(0, fresh.creditsLimit - fresh.creditsUsed);
+        summary = `✅ Refinement applied. *${remaining}* free enhancement${remaining === 1 ? "" : "s"} remaining.`;
+      }
+    }
+    await sendWhatsAppTextMessage({ to: from, body: summary });
+    await sendRefinementButtons(from);
+  } catch (err) {
+    console.error("WhatsApp refinement error:", err);
+    // Only refund guest credits (simple counter). Verified user refunds are skipped
+    // because consumeWeeklyAICredit may have drained weekly or purchased — refunding
+    // the wrong bucket is worse than eating one credit on failure.
+    if (!session.isVerified) {
+      await prisma.whatsAppSession.update({
+        where: { id: session.id },
+        data: { creditsUsed: { decrement: 1 } },
+      });
+    }
+    await sendWhatsAppTextMessage({
+      to: from,
+      body: "Sorry, I couldn't apply that refinement. Try rephrasing it, or send a new image.",
+    });
   }
 }
 
