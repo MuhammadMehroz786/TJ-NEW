@@ -6,6 +6,7 @@ import path from "path";
 import crypto from "crypto";
 import { authenticate, AuthRequest, requireRole } from "../middleware/auth";
 import { AICreditError, consumeWeeklyAICredit } from "../services/aiCredits";
+import { refineProductImage } from "../services/imageRefinement";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -284,6 +285,124 @@ STRICT RULES:
     }
     console.error("AI Studio enhance error:", err);
     res.status(500).json({ error: err.message || "Failed to enhance image", code: "ENHANCE_ERROR" });
+  }
+});
+
+// POST /api/ai-studio/refine
+router.post("/refine", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { imageId, instruction, folderId } = req.body as {
+      imageId?: string;
+      instruction?: string;
+      folderId?: string | null;
+    };
+
+    if (!imageId || typeof imageId !== "string") {
+      res.status(400).json({ error: "imageId is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    const trimmedInstruction = String(instruction || "").trim();
+    if (trimmedInstruction.length < 3) {
+      res.status(400).json({ error: "Please describe the refinement (at least 3 characters)", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (trimmedInstruction.length > 500) {
+      res.status(400).json({ error: "Refinement instruction is too long (max 500 characters)", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (!process.env.GEMINI_API_KEY) {
+      res.status(500).json({ error: "GEMINI_API_KEY is not set", code: "CONFIG_ERROR" });
+      return;
+    }
+
+    const sourceImage = await prisma.aiStudioImage.findFirst({
+      where: { id: imageId, userId: req.auth!.userId },
+      select: { id: true, imagePath: true, background: true, folderId: true },
+    });
+    if (!sourceImage) {
+      res.status(404).json({ error: "Image not found", code: "NOT_FOUND" });
+      return;
+    }
+
+    const storageRoot = path.resolve(process.cwd(), "storage");
+    const sourceFullPath = path.join(storageRoot, sourceImage.imagePath);
+    let sourceBuffer: Buffer;
+    try {
+      sourceBuffer = await fs.readFile(sourceFullPath);
+    } catch {
+      res.status(404).json({ error: "Source image file not found", code: "NOT_FOUND" });
+      return;
+    }
+
+    const sourceMimeType =
+      sourceImage.imagePath.endsWith(".png") ? "image/png" :
+      sourceImage.imagePath.endsWith(".webp") ? "image/webp" :
+      "image/jpeg";
+
+    const creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
+
+    const refined = await refineProductImage(
+      sourceBuffer.toString("base64"),
+      sourceMimeType,
+      trimmedInstruction,
+    );
+
+    const outputMimeType = refined.mimeType;
+    const extMap: Record<string, string> = {
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "image/webp": "webp",
+    };
+    const outputExt = extMap[outputMimeType] || "png";
+
+    const randomId = crypto.randomUUID();
+    const relativePath = path.join("ai-studio", req.auth!.userId, `${Date.now()}-${randomId}.${outputExt}`);
+    const normalizedPath = relativePath.replaceAll("\\", "/");
+    await saveBase64ToStorage(refined.base64, normalizedPath);
+
+    const imageUrl = `/media/${normalizedPath}`;
+
+    // Target folder: explicit folderId override > source image folder > null
+    let targetFolderId: string | null = null;
+    if (folderId === null) {
+      targetFolderId = null;
+    } else if (typeof folderId === "string" && folderId) {
+      const folder = await prisma.aiStudioFolder.findFirst({
+        where: { id: folderId, userId: req.auth!.userId },
+        select: { id: true },
+      });
+      if (folder) targetFolderId = folder.id;
+    } else {
+      targetFolderId = sourceImage.folderId;
+    }
+
+    const record = await prisma.aiStudioImage.create({
+      data: {
+        userId: req.auth!.userId,
+        folderId: targetFolderId,
+        imagePath: normalizedPath,
+        imageUrl,
+        background: sourceImage.background,
+      },
+      include: {
+        folder: { select: { id: true, name: true } },
+      },
+    });
+
+    res.status(201).json({
+      ...record,
+      remainingCredits: creditUsage.totalCredits,
+      weeklyCredits: creditUsage.weeklyCredits,
+      purchasedCredits: creditUsage.purchasedCredits,
+      creditsResetWeek: creditUsage.resetWeek,
+    });
+  } catch (err: unknown) {
+    if (err instanceof AICreditError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    console.error("AI Studio refine error:", err);
+    res.status(500).json({ error: (err as Error)?.message || "Failed to refine image", code: "REFINE_ERROR" });
   }
 });
 

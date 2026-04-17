@@ -56,6 +56,8 @@ export function AIStudio() {
   const [previewImage, setPreviewImage] = useState<AiStudioImage | null>(null);
   const [newlyEnhanced, setNewlyEnhanced] = useState<AiStudioImage | null>(null);
   const [savingEnhanceFolder, setSavingEnhanceFolder] = useState("none");
+  const [refineInstruction, setRefineInstruction] = useState("");
+  const [refining, setRefining] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchFolders = useCallback(() => {
@@ -143,6 +145,34 @@ export function AIStudio() {
     } finally {
       setEnhancing(false);
       setEnhanceProgress("");
+    }
+  };
+
+  const handleRefine = async (instruction: string) => {
+    if (!previewImage) return;
+    const trimmed = instruction.trim();
+    if (trimmed.length < 3) return toast.error("Describe the refinement in at least 3 characters");
+    setRefining(true);
+    try {
+      const res = await api.post("/ai-studio/refine", {
+        imageId: previewImage.id,
+        instruction: trimmed,
+      }, { timeout: 120000 });
+      const refined: AiStudioImage = res.data;
+      setImages((prev) => [refined, ...prev]);
+      setPreviewImage(refined);
+      setRefineInstruction("");
+      if (typeof res.data?.remainingCredits === "number") {
+        setAiCredits(res.data.remainingCredits);
+        if (typeof res.data.weeklyCredits === "number") setWeeklyCredits(res.data.weeklyCredits);
+        if (typeof res.data.purchasedCredits === "number") setPurchasedCredits(res.data.purchasedCredits);
+      }
+      fetchFolders();
+      toast.success("Refinement applied");
+    } catch (err: unknown) {
+      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Refinement failed");
+    } finally {
+      setRefining(false);
     }
   };
 
@@ -374,10 +404,64 @@ export function AIStudio() {
         </CardContent>
       </Card>
 
-      <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
+      <Dialog
+        open={!!previewImage}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewImage(null);
+            setRefineInstruction("");
+          }
+        }}
+      >
         <DialogContent className="max-w-3xl">
           <DialogHeader><DialogTitle>Image Preview</DialogTitle></DialogHeader>
-          {previewImage && <img src={previewImage.imageUrl} alt="Preview" className="w-full max-h-[70vh] object-contain rounded-lg bg-slate-50" />}
+          {previewImage && (
+            <div className="space-y-4">
+              <img src={previewImage.imageUrl} alt="Preview" className="w-full max-h-[55vh] object-contain rounded-lg bg-slate-50" />
+
+              <div className="space-y-2 border-t pt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-slate-900">Refine this image</p>
+                  <span className="text-xs text-slate-500">Costs 1 credit</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: "Change background", value: "Replace the background with a different professional e-commerce scene while keeping the product identical." },
+                    { label: "Brighter lighting",  value: "Improve the lighting — brighter, cleaner, evenly lit with soft natural shadows." },
+                    { label: "Warmer tones",       value: "Shift the color tone to be warmer and more inviting, while keeping the product colors accurate." },
+                  ].map((chip) => (
+                    <button
+                      key={chip.label}
+                      type="button"
+                      disabled={refining}
+                      onClick={() => handleRefine(chip.value)}
+                      className="text-xs px-3 py-1.5 rounded-full border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 disabled:opacity-50"
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="e.g. crop tighter, add soft shadows, change to outdoor scene..."
+                    value={refineInstruction}
+                    onChange={(e) => setRefineInstruction(e.target.value)}
+                    disabled={refining}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !refining) handleRefine(refineInstruction);
+                    }}
+                  />
+                  <Button
+                    onClick={() => handleRefine(refineInstruction)}
+                    disabled={refining || refineInstruction.trim().length < 3}
+                    className="bg-teal-600 hover:bg-teal-700 text-white whitespace-nowrap"
+                  >
+                    {refining ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Refining...</> : <><Sparkles className="h-4 w-4 mr-2" />Refine</>}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
