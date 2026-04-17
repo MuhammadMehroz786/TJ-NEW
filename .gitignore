@@ -8,3 +8,4 @@ dist/
 .prisma/
 .claude/
 server/storage/
+Context.md
