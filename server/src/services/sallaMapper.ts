@@ -67,11 +67,12 @@ export function tijarflowProductToSalla(product: {
   images?:        unknown;
   status:         string;
   currency?:      string | null;
-}): SallaProductPayload {
+}, absolutizeUrl: (u: string) => string = (u) => u): SallaProductPayload {
   const currency = product.currency ?? "SAR";
   const images   = Array.isArray(product.images)
     ? (product.images as string[])
-        .filter((url) => url.startsWith("http"))
+        .map((url) => absolutizeUrl(url))
+        .filter((url) => /^https?:\/\//i.test(url))
         .map((url) => ({ url }))
     : [];
 

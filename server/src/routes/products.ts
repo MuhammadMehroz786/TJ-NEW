@@ -3,6 +3,8 @@ import { PrismaClient, Prisma } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { ShopifyService, ShopifyAuthError, ShopifyApiError } from "../services/shopify";
 import { tijarflowProductToShopify } from "../services/shopifyMapper";
+import { SallaService, SallaAuthError, SallaApiError } from "../services/salla";
+import { tijarflowProductToSalla } from "../services/sallaMapper";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -200,16 +202,21 @@ router.post("/push", async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
+    const base = (process.env.PUBLIC_BASE_URL || "https://app.tijarflow.com").replace(/\/+$/, "");
+    const absolutize = (url: string): string => {
+      if (/^https?:\/\//i.test(url)) return url;
+      if (url.startsWith("/")) return `${base}${url}`;
+      return url;
+    };
+
     if (connection.platform === "SHOPIFY") {
       const shopify = new ShopifyService(connection, prisma);
       let pushed = 0;
 
-      // Process sequentially to respect rate limits
       for (const product of products) {
-        const payload = tijarflowProductToShopify(product);
+        const payload = tijarflowProductToShopify(product, absolutize);
 
         if (product.platformProductId) {
-          // Update existing product on Shopify
           const updated = await shopify.updateProduct(product.platformProductId, payload);
           await prisma.product.update({
             where: { id: product.id },
@@ -220,7 +227,6 @@ router.post("/push", async (req: AuthRequest, res: Response): Promise<void> => {
             },
           });
         } else {
-          // Create new product on Shopify
           const created = await shopify.createProduct(payload);
           await prisma.product.update({
             where: { id: product.id },
@@ -240,33 +246,72 @@ router.post("/push", async (req: AuthRequest, res: Response): Promise<void> => {
         count: pushed,
         platform: "SHOPIFY",
       });
-    } else {
-      // SALLA — still simulated for now
-      const updated = await Promise.all(
-        products.map((product) =>
-          prisma.product.update({
+      return;
+    }
+
+    if (connection.platform === "SALLA") {
+      const salla = new SallaService(connection, prisma);
+      let pushed = 0;
+
+      for (const product of products) {
+        const payload = tijarflowProductToSalla(
+          {
+            title: product.title,
+            description: product.description,
+            price: product.price,
+            compareAtPrice: product.compareAtPrice,
+            sku: product.sku,
+            quantity: product.quantity,
+            images: product.images,
+            status: product.status,
+            currency: product.currency,
+          },
+          absolutize,
+        );
+
+        if (product.platformProductId) {
+          const updated = await salla.updateProduct(product.platformProductId, payload);
+          await prisma.product.update({
             where: { id: product.id },
             data: {
               marketplaceConnectionId: connectionId,
-              platformProductId: product.platformProductId || `salla_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              platformData: updated as unknown as Prisma.JsonObject,
               status: "ACTIVE",
             },
-          })
-        )
-      );
+          });
+        } else {
+          const created = await salla.createProduct(payload);
+          await prisma.product.update({
+            where: { id: product.id },
+            data: {
+              marketplaceConnectionId: connectionId,
+              platformProductId: String(created.id),
+              platformData: created as unknown as Prisma.JsonObject,
+              status: "ACTIVE",
+            },
+          });
+        }
+        pushed++;
+      }
 
       res.json({
-        message: `Pushed ${updated.length} product(s) to Salla`,
-        count: updated.length,
+        message: `Pushed ${pushed} product(s) to Salla`,
+        count: pushed,
         platform: "SALLA",
       });
+      return;
     }
+
+    res.status(400).json({ error: "Unsupported platform", code: "VALIDATION_ERROR" });
   } catch (err) {
-    if (err instanceof ShopifyAuthError) {
-      res.status(400).json({ error: err.message, code: "SHOPIFY_AUTH_ERROR" });
-    } else if (err instanceof ShopifyApiError) {
-      res.status(502).json({ error: err.message, code: "SHOPIFY_API_ERROR" });
+    if (err instanceof ShopifyAuthError || err instanceof SallaAuthError) {
+      const code = err instanceof ShopifyAuthError ? "SHOPIFY_AUTH_ERROR" : "SALLA_AUTH_ERROR";
+      res.status(400).json({ error: err.message, code });
+    } else if (err instanceof ShopifyApiError || err instanceof SallaApiError) {
+      const code = err instanceof ShopifyApiError ? "SHOPIFY_API_ERROR" : "SALLA_API_ERROR";
+      res.status(502).json({ error: err.message, code });
     } else {
+      console.error("Push error:", err);
       res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
     }
   }

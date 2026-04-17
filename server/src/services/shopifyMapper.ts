@@ -62,10 +62,12 @@ export function tijarflowProductToShopify(
     vendor?: string | null;
     status: string;
   },
+  absolutizeUrl: (u: string) => string = (u) => u,
 ): ShopifyProductPayload {
   const images = Array.isArray(product.images)
     ? (product.images as string[])
-        .filter((src) => src.startsWith("http"))
+        .map((src) => absolutizeUrl(src))
+        .filter((src) => /^https?:\/\//i.test(src))
         .map((src, i) => ({ src, position: i + 1 }))
     : [];
 
