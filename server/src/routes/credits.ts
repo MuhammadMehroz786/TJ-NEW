@@ -7,9 +7,18 @@ import { getAICredits } from "../services/aiCredits";
 const router = Router();
 const prisma = new PrismaClient();
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-03-25.dahlia",
-});
+let stripeInstance: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!stripeInstance) {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      throw new Error("STRIPE_SECRET_KEY is not configured");
+    }
+    stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: "2026-03-25.dahlia",
+    });
+  }
+  return stripeInstance;
+}
 
 // ── Pricing tiers ────────────────────────────────────────────────────────────
 const PRICING_TIERS: { credits: number; priceUsd: number; label: string; tag?: string }[] = [
@@ -137,7 +146,7 @@ router.post("/checkout", authenticate, async (req: AuthRequest, res: Response): 
     const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
     const tierLabel = PRICING_TIERS.find((t) => t.credits === credits)?.label || "Custom";
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
       line_items: [
@@ -193,7 +202,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let event: any;
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = getStripe().webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err: unknown) {
     console.error("Webhook signature verification failed:", err);
     res.status(400).json({ error: "Invalid webhook signature" });
