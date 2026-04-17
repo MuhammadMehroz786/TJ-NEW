@@ -438,7 +438,7 @@ export function Products() {
   const [studioFolderFilter, setStudioFolderFilter] = useState("all");
   const [studioPickerLoading, setStudioPickerLoading] = useState(false);
   const [studioSelected, setStudioSelected] = useState<Set<string>>(new Set());
-  const [studioSearch, setStudioSearch] = useState("");
+  const [, setStudioSearch] = useState("");
 
   // Advertise state
   const [advertiseProduct, setAdvertiseProduct] = useState<Product | null>(null);
