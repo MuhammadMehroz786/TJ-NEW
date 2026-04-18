@@ -20,6 +20,7 @@ import { ProductMarketplace } from "@/pages/ProductMarketplace";
 import { AIStudio } from "@/pages/AIStudio";
 import { Billing } from "@/pages/Billing";
 import { Admin } from "@/pages/Admin";
+import { AdminLogin } from "@/pages/AdminLogin";
 import { useAuth } from "@/hooks/useAuth";
 import { Navigate as Nav } from "react-router-dom";
 
@@ -35,6 +36,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/admin-login" element={<AdminLogin />} />
 
         <Route
           element={

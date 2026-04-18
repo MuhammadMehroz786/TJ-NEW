@@ -335,6 +335,21 @@ model PendingSignup {
   @@index([otpExpiresAt])
 }
 
+// Short-lived login codes for admin passwordless authentication.
+// One row per email at a time (upserted). Deleted on successful verify.
+model AdminLoginCode {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  codeHash     String
+  expiresAt    DateTime
+  attempts     Int      @default(0)
+  requestedIp  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
 model CreditPurchase {
   id              String               @id @default(uuid())
   userId          String

@@ -16,6 +16,10 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  /** Step 1 of admin passwordless login: request an email code. Always resolves; generic message regardless of existence. */
+  adminRequestCode: (email: string) => Promise<void>;
+  /** Step 2: verify the code, issue JWT, set auth state. */
+  adminVerifyCode: (email: string, code: string) => Promise<void>;
   /** Kick off sign-up: parks credentials on the server and sends an OTP. Returns the email to show the OTP step. */
   signupStart: (name: string, email: string, password: string, role: string) => Promise<{ email: string; message: string }>;
   /** Complete sign-up: verifies OTP, creates user, issues JWT, logs in. */
@@ -35,6 +39,17 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   login: async (email: string, password: string) => {
     const res = await api.post("/auth/login", { email, password });
+    const { token, user } = res.data;
+    localStorage.setItem("tijarflow_token", token);
+    set({ token, user, isAuthenticated: true, isLoading: false });
+  },
+
+  adminRequestCode: async (email: string) => {
+    await api.post("/auth/admin/request-code", { email });
+  },
+
+  adminVerifyCode: async (email: string, code: string) => {
+    const res = await api.post("/auth/admin/verify-code", { email, code });
     const { token, user } = res.data;
     localStorage.setItem("tijarflow_token", token);
     set({ token, user, isAuthenticated: true, isLoading: false });

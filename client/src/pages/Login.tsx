@@ -87,6 +87,9 @@ export function Login() {
               Create one
             </Link>
           </p>
+          <p className="mt-2 text-center text-xs text-slate-400">
+            <Link to="/admin-login" className="hover:text-slate-600">Admin sign-in</Link>
+          </p>
         </CardContent>
       </Card>
     </AuthLayout>
