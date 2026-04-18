@@ -254,6 +254,196 @@ router.patch("/users/:id/role", async (req: AuthRequest, res: Response): Promise
   }
 });
 
+// ── GET /api/admin/timeseries — daily counts for the last N days ──────────────
+// Returns signups, enhancements, revenue ($), credits spent per day. Used for
+// admin dashboard line charts. Days are UTC-based and go back `days` days.
+router.get("/timeseries", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt((req.query.days as string) || "30", 10)));
+    const now = new Date();
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - days + 1));
+
+    // Raw group-by-day for each metric, using Prisma $queryRaw for date_trunc
+    const signupsRaw = await prisma.$queryRaw<{ day: Date; count: bigint }[]>`
+      SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::bigint AS count
+      FROM "User"
+      WHERE "createdAt" >= ${start}
+      GROUP BY 1 ORDER BY 1 ASC`;
+    const enhancementsRaw = await prisma.$queryRaw<{ day: Date; count: bigint }[]>`
+      SELECT date_trunc('day', "createdAt") AS day, COUNT(*)::bigint AS count
+      FROM "AiStudioImage"
+      WHERE "createdAt" >= ${start}
+      GROUP BY 1 ORDER BY 1 ASC`;
+    const revenueRaw = await prisma.$queryRaw<{ day: Date; revenue: number; credits: bigint }[]>`
+      SELECT date_trunc('day', "createdAt") AS day,
+             COALESCE(SUM("amount")::float, 0) AS revenue,
+             COALESCE(SUM("credits"), 0)::bigint AS credits
+      FROM "CreditPurchase"
+      WHERE "createdAt" >= ${start} AND "status" = 'COMPLETED'
+      GROUP BY 1 ORDER BY 1 ASC`;
+
+    // Build a dense series (zero-filled) so charts render smoothly
+    const byDay: Record<string, { day: string; signups: number; enhancements: number; revenue: number; creditsSold: number }> = {};
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start);
+      d.setUTCDate(start.getUTCDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      byDay[key] = { day: key, signups: 0, enhancements: 0, revenue: 0, creditsSold: 0 };
+    }
+    for (const r of signupsRaw) {
+      const k = new Date(r.day).toISOString().slice(0, 10);
+      if (byDay[k]) byDay[k].signups = Number(r.count);
+    }
+    for (const r of enhancementsRaw) {
+      const k = new Date(r.day).toISOString().slice(0, 10);
+      if (byDay[k]) byDay[k].enhancements = Number(r.count);
+    }
+    for (const r of revenueRaw) {
+      const k = new Date(r.day).toISOString().slice(0, 10);
+      if (byDay[k]) {
+        byDay[k].revenue = Number(r.revenue);
+        byDay[k].creditsSold = Number(r.credits);
+      }
+    }
+
+    res.json({ days, series: Object.values(byDay) });
+  } catch (err) {
+    console.error("[admin] timeseries error:", err);
+    res.status(500).json({ error: "Failed to load timeseries", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── GET /api/admin/active-users — DAU / WAU / MAU ─────────────────────────────
+// "Active" = user who enhanced an image OR made a completed purchase in window
+router.get("/active-users", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const now = Date.now();
+    const windows: { name: "dau" | "wau" | "mau"; ms: number }[] = [
+      { name: "dau", ms: 24 * 60 * 60 * 1000 },
+      { name: "wau", ms: 7 * 24 * 60 * 60 * 1000 },
+      { name: "mau", ms: 30 * 24 * 60 * 60 * 1000 },
+    ];
+    const out: Record<string, number> = {};
+    for (const w of windows) {
+      const since = new Date(now - w.ms);
+      const rows = await prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT COUNT(DISTINCT u.id)::bigint AS count
+        FROM "User" u
+        WHERE EXISTS (SELECT 1 FROM "AiStudioImage" i WHERE i."userId" = u.id AND i."createdAt" >= ${since})
+           OR EXISTS (SELECT 1 FROM "CreditPurchase" p WHERE p."userId" = u.id AND p."createdAt" >= ${since} AND p."status" = 'COMPLETED')`;
+      out[w.name] = Number(rows[0]?.count || 0);
+    }
+    res.json(out);
+  } catch (err) {
+    console.error("[admin] active-users error:", err);
+    res.status(500).json({ error: "Failed to load active users", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── GET /api/admin/top-users — by credits spent (via enhancements) ────────────
+router.get("/top-users", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const limit = Math.min(50, Math.max(1, parseInt((req.query.limit as string) || "10", 10)));
+    const rows = await prisma.$queryRaw<
+      { id: string; email: string; name: string; role: string; enhancements: bigint; revenue: number; credits_bought: bigint }[]
+    >`
+      SELECT u.id, u.email, u.name, u.role::text,
+        (SELECT COUNT(*) FROM "AiStudioImage" i WHERE i."userId" = u.id)::bigint AS enhancements,
+        COALESCE((SELECT SUM("amount")::float FROM "CreditPurchase" p WHERE p."userId" = u.id AND p."status" = 'COMPLETED'), 0) AS revenue,
+        COALESCE((SELECT SUM("credits") FROM "CreditPurchase" p WHERE p."userId" = u.id AND p."status" = 'COMPLETED'), 0)::bigint AS credits_bought
+      FROM "User" u
+      WHERE u.role != 'ADMIN'
+      ORDER BY enhancements DESC, revenue DESC
+      LIMIT ${limit}`;
+
+    res.json({
+      data: rows.map((r) => ({
+        id: r.id,
+        email: r.email,
+        name: r.name,
+        role: r.role,
+        enhancements: Number(r.enhancements),
+        revenueUsd: Number(r.revenue),
+        creditsBought: Number(r.credits_bought),
+      })),
+    });
+  } catch (err) {
+    console.error("[admin] top-users error:", err);
+    res.status(500).json({ error: "Failed to load top users", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── GET /api/admin/funnel — signup → enhance → purchase → WhatsApp link ───────
+router.get("/funnel", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const [signed, enhanced, purchased, waLinked] = await Promise.all([
+      prisma.user.count({ where: { role: { in: ["MERCHANT", "CREATOR"] } } }),
+      prisma.user.count({ where: { role: { in: ["MERCHANT", "CREATOR"] }, aiStudioImages: { some: {} } } }),
+      prisma.user.count({ where: { role: { in: ["MERCHANT", "CREATOR"] }, creditPurchases: { some: { status: "COMPLETED" } } } }),
+      prisma.user.count({ where: { role: { in: ["MERCHANT", "CREATOR"] }, whatsappSessions: { some: { isVerified: true } } } }),
+    ]);
+    res.json({
+      signed,
+      enhanced,
+      purchased,
+      waLinked,
+      enhancedRate: signed ? enhanced / signed : 0,
+      purchasedRate: signed ? purchased / signed : 0,
+      waLinkedRate: signed ? waLinked / signed : 0,
+    });
+  } catch (err) {
+    console.error("[admin] funnel error:", err);
+    res.status(500).json({ error: "Failed to load funnel", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── GET /api/admin/whatsapp-stats — session breakdown ─────────────────────────
+router.get("/whatsapp-stats", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [total, verified, exhausted, activeLast24h, byState] = await Promise.all([
+      prisma.whatsAppSession.count(),
+      prisma.whatsAppSession.count({ where: { isVerified: true } }),
+      prisma.whatsAppSession.count({ where: { state: "exhausted" } }),
+      prisma.whatsAppSession.count({ where: { lastMessageAt: { gte: dayAgo } } }),
+      prisma.$queryRaw<{ state: string; count: bigint }[]>`
+        SELECT state, COUNT(*)::bigint AS count FROM "WhatsAppSession" GROUP BY 1 ORDER BY 2 DESC`,
+    ]);
+    res.json({
+      total,
+      verified,
+      guest: total - verified,
+      exhausted,
+      activeLast24h,
+      byState: byState.map((r) => ({ state: r.state, count: Number(r.count) })),
+    });
+  } catch (err) {
+    console.error("[admin] whatsapp-stats error:", err);
+    res.status(500).json({ error: "Failed to load WhatsApp stats", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── GET /api/admin/system-health — uptime, memory, recent errors ──────────────
+router.get("/system-health", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const mem = process.memoryUsage();
+    const db = await prisma.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*)::bigint AS count FROM pg_stat_activity WHERE datname = current_database()`;
+    res.json({
+      uptimeSeconds: Math.round(process.uptime()),
+      memory: {
+        rssMb: Math.round(mem.rss / 1024 / 1024),
+        heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+        heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+      },
+      db: { connections: Number(db[0]?.count || 0) },
+      nodeVersion: process.version,
+    });
+  } catch (err) {
+    console.error("[admin] system-health error:", err);
+    res.status(500).json({ error: "Failed to load system health", code: "INTERNAL_ERROR" });
+  }
+});
+
 // ── GET /api/admin/purchases — recent purchases across all users ──────────────
 router.get("/purchases", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
