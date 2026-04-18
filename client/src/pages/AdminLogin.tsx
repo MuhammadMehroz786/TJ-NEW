@@ -62,7 +62,7 @@ export function AdminLogin() {
     setResending(true);
     try {
       await adminRequestCode(email.trim().toLowerCase());
-      toast.success("If this email belongs to an admin, a fresh code has been sent.");
+      toast.success("A fresh code has been sent. Use the newest email — older codes no longer work.", { duration: 6000 });
       setCode("");
     } catch (err: unknown) {
       toast.error(

@@ -255,13 +255,13 @@ async function sendAdminLoginEmail(email: string, code: string): Promise<void> {
   await sendMail({
     to: email,
     subject: `Your TijarFlow admin sign-in code: ${code}`,
-    text: `Your admin sign-in code is: ${code}\n\nThis code will expire in ${OTP_TTL_MINUTES} minutes. If you didn't request it, someone is trying to access the admin portal — please rotate your credentials immediately.\n\n— TijarFlow`,
+    text: `Your admin sign-in code is: ${code}\n\nThis code will expire in ${OTP_TTL_MINUTES} minutes. If you requested multiple codes, only the most recent one will work. If you didn't request any code, someone is trying to access the admin portal — rotate your credentials immediately.\n\n— TijarFlow`,
     html: `<!doctype html>
 <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:40px auto;padding:32px;background:#f8fafc;border-radius:12px;">
   <h2 style="color:#0f172a;margin:0 0 8px">Admin sign-in code</h2>
   <p style="color:#475569;font-size:15px;line-height:1.5;margin:0 0 24px">Enter this 6-digit code to access the TijarFlow admin portal:</p>
   <div style="font-family:'SF Mono',Menlo,Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:8px;color:#7c3aed;background:#ffffff;padding:20px;border-radius:8px;text-align:center;border:1px solid #e2e8f0;margin-bottom:24px">${code}</div>
-  <p style="color:#64748b;font-size:13px;line-height:1.5;margin:0">Expires in ${OTP_TTL_MINUTES} minutes. If you didn't request this, someone is trying to access the admin portal — please rotate your credentials immediately.</p>
+  <p style="color:#64748b;font-size:13px;line-height:1.5;margin:0">Expires in ${OTP_TTL_MINUTES} minutes. If you requested multiple codes, only the most recent one will work. If you didn't request any, someone is trying to access the admin portal — rotate your credentials immediately.</p>
   <hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0"/>
   <p style="color:#94a3b8;font-size:12px;margin:0">TijarFlow — Admin access</p>
 </body></html>`,
