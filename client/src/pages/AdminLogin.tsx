@@ -25,7 +25,9 @@ export function AdminLogin() {
     setLoading(true);
     try {
       await adminRequestCode(trimmed);
-      toast.success("If your email is an admin account, a sign-in code was sent.");
+      // Deliberately don't confirm whether the email is a real admin —
+      // prevents attackers from enumerating admin accounts via this endpoint.
+      toast.success("Check your inbox if that email belongs to an admin.");
       setStep(2);
     } catch (err: unknown) {
       toast.error(
@@ -60,7 +62,7 @@ export function AdminLogin() {
     setResending(true);
     try {
       await adminRequestCode(email.trim().toLowerCase());
-      toast.success("A fresh code has been sent.");
+      toast.success("If this email belongs to an admin, a fresh code has been sent.");
       setCode("");
     } catch (err: unknown) {
       toast.error(
@@ -85,7 +87,7 @@ export function AdminLogin() {
           <CardDescription className="text-slate-500">
             {step === 1
               ? "Admins sign in with an email code — no password"
-              : `We sent a 6-digit code to ${email}`}
+              : `If ${email} is an admin, a code is on its way.`}
           </CardDescription>
           <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
@@ -135,9 +137,12 @@ export function AdminLogin() {
                 Back
               </button>
               <form onSubmit={handleVerify} className="space-y-4">
-                <div className="flex items-center gap-3 p-3 rounded-lg bg-purple-50/60 border border-purple-100 text-sm text-purple-800">
-                  <Mail className="h-4 w-4 shrink-0" />
-                  <span>Check your inbox. Code expires in 10 minutes.</span>
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-purple-50/60 border border-purple-100 text-sm text-purple-800">
+                  <Mail className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    A code has been sent only if this email belongs to an admin account. It arrives in about 30 seconds and expires in 10 minutes.
+                    If nothing arrives, double-check the email address and go back.
+                  </span>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="code">6-digit code</Label>
