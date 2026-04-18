@@ -7,7 +7,7 @@ export function ProtectedRoute({
   role,
 }: {
   children: React.ReactNode;
-  role?: "MERCHANT" | "CREATOR";
+  role?: "MERCHANT" | "CREATOR" | "ADMIN";
 }) {
   const { isAuthenticated, isLoading, token, user, fetchUser } = useAuth();
 

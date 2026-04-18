@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Package, Store, Megaphone, Settings, LogOut, ChevronDown, Tag, CreditCard, Sparkles, Wallet } from "lucide-react";
+import { LayoutDashboard, Package, Store, Megaphone, Settings, LogOut, ChevronDown, Tag, CreditCard, Sparkles, Wallet, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   DropdownMenu,
@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
-const navItems = [
+const merchantNav = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/products", icon: Package, label: "Products" },
   { to: "/marketplaces", icon: Store, label: "Marketplaces" },
@@ -18,6 +18,11 @@ const navItems = [
   { to: "/sales", icon: CreditCard, label: "Sales Attribution" },
   { to: "/ai-studio", icon: Sparkles, label: "AI Studio" },
   { to: "/billing", icon: Wallet, label: "Credits & Billing" },
+  { to: "/settings", icon: Settings, label: "Settings" },
+];
+
+const adminNav = [
+  { to: "/admin", icon: ShieldCheck, label: "Admin" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
@@ -53,7 +58,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {(user?.role === "ADMIN" ? adminNav : merchantNav).map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}

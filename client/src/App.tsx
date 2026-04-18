@@ -19,10 +19,13 @@ import { ManualSales } from "@/pages/ManualSales";
 import { ProductMarketplace } from "@/pages/ProductMarketplace";
 import { AIStudio } from "@/pages/AIStudio";
 import { Billing } from "@/pages/Billing";
+import { Admin } from "@/pages/Admin";
 import { useAuth } from "@/hooks/useAuth";
+import { Navigate as Nav } from "react-router-dom";
 
 function DashboardSwitch() {
   const { user } = useAuth();
+  if (user?.role === "ADMIN") return <Nav to="/admin" replace />;
   return user?.role === "CREATOR" ? <CreatorDashboard /> : <Dashboard />;
 }
 
@@ -52,6 +55,9 @@ export default function App() {
           <Route path="/ai-studio" element={<ProtectedRoute role="MERCHANT"><AIStudio /></ProtectedRoute>} />
           <Route path="/billing" element={<ProtectedRoute role="MERCHANT"><Billing /></ProtectedRoute>} />
           <Route path="/shopify-guide" element={<ProtectedRoute role="MERCHANT"><ShopifyGuide /></ProtectedRoute>} />
+
+          {/* Admin-only */}
+          <Route path="/admin" element={<ProtectedRoute role="ADMIN"><Admin /></ProtectedRoute>} />
 
           {/* Creator-only */}
           <Route path="/campaigns" element={<ProtectedRoute role="CREATOR"><Campaigns /></ProtectedRoute>} />

@@ -27,6 +27,7 @@ enum ProductStatus {
 enum UserRole {
   MERCHANT
   CREATOR
+  ADMIN
 }
 
 enum CampaignStatus {

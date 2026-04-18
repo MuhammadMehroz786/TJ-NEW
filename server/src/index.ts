@@ -30,6 +30,8 @@ import aiStudioRoutes from "./routes/aiStudio";
 import whatsappRoutes from "./routes/whatsapp";
 import creditsRoutes from "./routes/credits";
 import sallaRoutes from "./routes/salla";
+import adminRoutes from "./routes/admin";
+import { PrismaClient } from "@prisma/client";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -105,11 +107,34 @@ app.use("/api/whatsapp", whatsappRoutes);
 app.use("/api/credits/checkout", checkoutLimiter);
 app.use("/api/credits", creditsRoutes);
 app.use("/api/salla", sallaRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// Bootstrap admins: any user whose email appears in ADMIN_EMAILS (comma-separated)
+// is promoted to ADMIN at boot. Idempotent — already-admin users are left alone.
+// Users not yet signed up are skipped silently and picked up next time.
+async function bootstrapAdmins() {
+  const raw = process.env.ADMIN_EMAILS || "";
+  const emails = raw.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  if (emails.length === 0) return;
+  const p = new PrismaClient();
+  try {
+    const { count } = await p.user.updateMany({
+      where: { email: { in: emails }, role: { not: "ADMIN" } },
+      data: { role: "ADMIN" },
+    });
+    if (count > 0) console.log(`[startup] Promoted ${count} user(s) to ADMIN`);
+  } catch (err) {
+    console.error("[startup] bootstrap admins failed:", err);
+  } finally {
+    await p.$disconnect();
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  bootstrapAdmins();
 });
