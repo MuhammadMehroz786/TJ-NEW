@@ -91,4 +91,22 @@ router.put("/password", async (req: AuthRequest, res: Response): Promise<void> =
   }
 });
 
+// PATCH /api/user/language — persist UI locale on the user profile
+router.patch("/language", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const lang = String(req.body?.language || "").trim().toLowerCase();
+    if (lang !== "en" && lang !== "ar") {
+      res.status(400).json({ error: "language must be 'en' or 'ar'", code: "VALIDATION_ERROR" });
+      return;
+    }
+    await prisma.user.update({
+      where: { id: req.auth!.userId },
+      data: { language: lang },
+    });
+    res.json({ language: lang });
+  } catch {
+    res.status(500).json({ error: "Failed to save language", code: "INTERNAL_ERROR" });
+  }
+});
+
 export default router;

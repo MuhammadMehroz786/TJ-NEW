@@ -1,13 +1,23 @@
 import { create } from "zustand";
 import api from "@/lib/api";
+import { setLanguage, type SupportedLang } from "@/i18n";
 
 interface User {
   id: string;
   email: string;
   name: string;
   role: "MERCHANT" | "CREATOR" | "ADMIN";
+  language?: "en" | "ar";
   createdAt: string;
   updatedAt: string;
+}
+
+/** Sync i18next to the user's saved language, if one is set. */
+function applyUserLanguage(user: User | null | undefined) {
+  if (!user?.language) return;
+  if (user.language === "en" || user.language === "ar") {
+    setLanguage(user.language as SupportedLang);
+  }
 }
 
 interface AuthState {
@@ -41,6 +51,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const res = await api.post("/auth/login", { email, password });
     const { token, user } = res.data;
     localStorage.setItem("tijarflow_token", token);
+    applyUserLanguage(user);
     set({ token, user, isAuthenticated: true, isLoading: false });
   },
 
@@ -52,6 +63,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const res = await api.post("/auth/admin/verify-code", { email, code });
     const { token, user } = res.data;
     localStorage.setItem("tijarflow_token", token);
+    applyUserLanguage(user);
     set({ token, user, isAuthenticated: true, isLoading: false });
   },
 
@@ -64,6 +76,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const res = await api.post("/auth/signup/verify", { email, code });
     const { token, user } = res.data;
     localStorage.setItem("tijarflow_token", token);
+    applyUserLanguage(user);
     set({ token, user, isAuthenticated: true, isLoading: false });
   },
 
@@ -79,6 +92,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   fetchUser: async () => {
     try {
       const res = await api.get("/auth/me");
+      applyUserLanguage(res.data.user);
       set({ user: res.data.user, isAuthenticated: true, isLoading: false });
     } catch {
       localStorage.removeItem("tijarflow_token");

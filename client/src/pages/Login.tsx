@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 
 export function Login() {
   const [email, setEmail] = useState("");
@@ -14,6 +15,7 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -36,31 +38,31 @@ export function Login() {
       <Card className="border-slate-200/60 shadow-xl shadow-slate-200/50">
         <CardHeader className="text-center pb-2">
           <CardTitle className="text-2xl font-semibold text-slate-900">
-            Welcome back
+            {t("login.title")}
           </CardTitle>
           <CardDescription className="text-slate-500">
-            Sign in to your account to continue
+            {t("login.subtitle")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("login.emailLabel")}</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="you@example.com"
+                placeholder={t("login.emailPlaceholder")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("login.passwordLabel")}</Label>
               <Input
                 id="password"
                 type="password"
-                placeholder="Enter your password"
+                placeholder={t("login.passwordPlaceholder")}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -74,21 +76,21 @@ export function Login() {
               {loading ? (
                 <span className="flex items-center gap-2">
                   <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Signing in...
+                  {t("login.submitting")}
                 </span>
               ) : (
-                "Sign in"
+                t("login.submit")
               )}
             </Button>
           </form>
           <p className="mt-6 text-center text-sm text-slate-500">
-            Don't have an account?{" "}
+            {t("login.noAccount")}{" "}
             <Link to="/signup" className="text-teal-600 font-medium hover:text-teal-700">
-              Create one
+              {t("login.createOne")}
             </Link>
           </p>
           <p className="mt-2 text-center text-xs text-slate-400">
-            <Link to="/admin-login" className="hover:text-slate-600">Admin sign-in</Link>
+            <Link to="/admin-login" className="hover:text-slate-600">{t("login.adminLogin")}</Link>
           </p>
         </CardContent>
       </Card>

@@ -62,6 +62,7 @@ model User {
   aiCredits        Int      @default(50)
   aiCreditsWeekKey String   @default("")
   purchasedCredits Int      @default(0)
+  language         String   @default("en")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
