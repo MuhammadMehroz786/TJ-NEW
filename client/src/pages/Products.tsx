@@ -442,6 +442,11 @@ export function Products() {
   const [studioSelected, setStudioSelected] = useState<Set<string>>(new Set());
   const [, setStudioSearch] = useState("");
 
+  // Enhance existing product (from marketplace sync or manual) state
+  const [enhanceProduct, setEnhanceProduct] = useState<Product | null>(null);
+  const [enhanceProductScene, setEnhanceProductScene] = useState("studio");
+  const [enhanceProductRunning, setEnhanceProductRunning] = useState(false);
+
   // Advertise state
   const [advertiseProduct, setAdvertiseProduct] = useState<Product | null>(null);
   const [creators, setCreators] = useState<any[]>([]);
@@ -721,6 +726,30 @@ export function Products() {
     }
   };
 
+  const openEnhanceProduct = (product: Product) => {
+    setEnhanceProduct(product);
+    setEnhanceProductScene("studio");
+  };
+
+  const runEnhanceProduct = async () => {
+    if (!enhanceProduct) return;
+    setEnhanceProductRunning(true);
+    try {
+      const res = await api.post(`/products/${enhanceProduct.id}/enhance`, { scene: enhanceProductScene });
+      toast.success("Enhanced image added to this product");
+      if (typeof res.data?.remainingCredits === "number") setAiCredits(res.data.remainingCredits);
+      setEnhanceProduct(null);
+      fetchProducts();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        "Failed to enhance product image";
+      toast.error(message);
+    } finally {
+      setEnhanceProductRunning(false);
+    }
+  };
+
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -966,6 +995,14 @@ export function Products() {
                             </DropdownMenuItem>
                           ))}
                           <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => openEnhanceProduct(product)}
+                            className="cursor-pointer"
+                            disabled={!product.images?.length}
+                          >
+                            <Sparkles className="mr-2 h-4 w-4 text-amber-500" />
+                            Enhance with AI
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => openAdvertise(product)}
                             className="cursor-pointer"
@@ -1507,6 +1544,92 @@ export function Products() {
               <Button className="w-full bg-teal-600 hover:bg-teal-700 text-white" disabled={sendingRequest || !brief.trim()} onClick={handleSendRequest}>
                 {sendingRequest ? "Sending..." : "Send Request & Pay"}
               </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Enhance Product Dialog */}
+      <Dialog
+        open={!!enhanceProduct}
+        onOpenChange={(open) => {
+          if (!open && !enhanceProductRunning) setEnhanceProduct(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-amber-500" />
+              Enhance with AI
+            </DialogTitle>
+          </DialogHeader>
+          {enhanceProduct && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                {enhanceProduct.images?.[0] && (
+                  <img
+                    src={enhanceProduct.images[0]}
+                    alt={enhanceProduct.title}
+                    className="h-16 w-16 rounded-md object-cover border border-slate-200"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-900 truncate">{enhanceProduct.title}</p>
+                  <p className="text-xs text-slate-500">
+                    Uses the first image. 1 credit per enhancement.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Background</Label>
+                <Select value={enhanceProductScene} onValueChange={setEnhanceProductScene}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {backgroundOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-md text-xs text-slate-600">
+                <span>AI Credits</span>
+                <span className={creditClassName + " font-medium"}>
+                  {aiCredits ?? "—"} available
+                </span>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setEnhanceProduct(null)}
+                  disabled={enhanceProductRunning}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-teal-600 hover:bg-teal-700 text-white"
+                  onClick={runEnhanceProduct}
+                  disabled={enhanceProductRunning || (aiCredits !== null && aiCredits <= 0)}
+                >
+                  {enhanceProductRunning ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Enhancing...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Enhance
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           )}
         </DialogContent>

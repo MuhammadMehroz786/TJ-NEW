@@ -6,6 +6,9 @@ import { tijarflowProductToShopify } from "../services/shopifyMapper";
 import { SallaService, SallaAuthError, SallaApiError } from "../services/salla";
 import { tijarflowProductToSalla } from "../services/sallaMapper";
 import { signMediaPath, MEDIA_TTL_SHORT, MEDIA_TTL_MARKETPLACE } from "../lib/mediaSign";
+import { enhanceWithGemini, fetchRemoteImage, readLocalMedia, backgroundScenes, EnhanceError } from "../lib/enhanceImage";
+import { saveEnhancementToLibrary } from "../lib/imageStorage";
+import { AICreditError, consumeWeeklyAICredit, refundOneCredit } from "../services/aiCredits";
 
 function signProductImages<T extends { images?: unknown }>(product: T): T {
   if (!Array.isArray(product.images)) return product;
@@ -180,6 +183,107 @@ router.delete("/:id", async (req: AuthRequest, res: Response): Promise<void> => 
     res.json({ message: "Product deleted" });
   } catch {
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  }
+});
+
+// POST /api/products/:id/enhance — enhance the product's first image and
+// prepend the result to product.images. One credit per call. Also saves the
+// enhanced image to the user's AI Studio library (folder: "Enhanced Products")
+// so it shows up alongside manual enhancements.
+router.post("/:id/enhance", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const sceneInput = typeof req.body?.scene === "string" ? req.body.scene : "studio";
+    const scene = backgroundScenes[sceneInput] ? sceneInput : "studio";
+
+    const product = await prisma.product.findFirst({
+      where: { id: req.params.id as string, userId: req.auth!.userId },
+    });
+    if (!product) {
+      res.status(404).json({ error: "Product not found", code: "NOT_FOUND" });
+      return;
+    }
+
+    const images = Array.isArray(product.images) ? (product.images as string[]) : [];
+    const sourceUrl = images.find((u) => typeof u === "string" && u.length > 0);
+    if (!sourceUrl) {
+      res.status(400).json({ error: "This product has no image to enhance", code: "NO_SOURCE_IMAGE" });
+      return;
+    }
+
+    // Pull source bytes — either local /media/... or a remote CDN URL.
+    let source: { mimeType: string; base64: string };
+    try {
+      if (sourceUrl.startsWith("/media/")) {
+        const rel = sourceUrl.slice("/media/".length).split("?")[0];
+        source = await readLocalMedia(rel);
+      } else if (/^https?:\/\//i.test(sourceUrl)) {
+        source = await fetchRemoteImage(sourceUrl);
+      } else {
+        res.status(400).json({ error: "Unsupported image source", code: "NO_SOURCE_IMAGE" });
+        return;
+      }
+    } catch (err) {
+      if (err instanceof EnhanceError) {
+        res.status(err.status).json({ error: err.message, code: err.code });
+        return;
+      }
+      throw err;
+    }
+
+    const creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
+
+    try {
+      const output = await enhanceWithGemini({
+        inputMime: source.mimeType,
+        inputBase64: source.base64,
+        scene,
+      });
+
+      const saved = await saveEnhancementToLibrary(prisma, {
+        userId: req.auth!.userId,
+        base64: output.base64,
+        mimeType: output.mimeType,
+        background: scene,
+        folderName: "Enhanced Products",
+      });
+
+      const updated = await prisma.product.update({
+        where: { id: product.id },
+        data: { images: [saved.imageUrl, ...images] },
+        include: { marketplaceConnection: { select: { id: true, platform: true, storeName: true } } },
+      });
+
+      res.json({
+        product: signProductImages(updated),
+        enhancedImageUrl: signMediaPath(saved.imagePath, MEDIA_TTL_SHORT),
+        scene,
+        remainingCredits: creditUsage.totalCredits,
+        weeklyCredits: creditUsage.weeklyCredits,
+        purchasedCredits: creditUsage.purchasedCredits,
+      });
+    } catch (innerErr) {
+      await refundOneCredit(prisma, req.auth!.userId, creditUsage.usedPool);
+      throw innerErr;
+    }
+  } catch (err: any) {
+    if (err instanceof AICreditError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    if (err instanceof EnhanceError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    console.error("Product enhance error:", err);
+    const message = err?.message || "";
+    if (/Unable to process input image|INVALID_ARGUMENT|input image/i.test(message)) {
+      res.status(400).json({
+        error: "We couldn't process that image. Try a different source image (JPEG or PNG, at least 200×200 px).",
+        code: "INVALID_IMAGE",
+      });
+      return;
+    }
+    res.status(500).json({ error: "Failed to enhance product image", code: "ENHANCE_ERROR" });
   }
 });
 
