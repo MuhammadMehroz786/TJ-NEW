@@ -53,6 +53,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import api from "@/lib/api";
 
 interface Product {
@@ -412,6 +413,7 @@ interface MarketplaceConn {
 }
 
 export function Products() {
+  const { t } = useTranslation();
   const [products, setProducts] = useState<Product[]>([]);
   const [aiCredits, setAiCredits] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
@@ -741,8 +743,8 @@ export function Products() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Products</h1>
-          <p className="text-slate-500 text-sm mt-1">{total} products total</p>
+          <h1 className="text-2xl font-semibold text-slate-900">{t("products.title")}</h1>
+          <p className="text-slate-500 text-sm mt-1">{total} · {t("products.subtitle")}</p>
           <p className={`text-sm mt-1 font-medium ${creditClassName}`}>
             AI Credits: {aiCredits ?? "—"} / 50 (resets every Monday)
           </p>
@@ -754,7 +756,7 @@ export function Products() {
         </div>
         <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700 text-white">
           <Plus className="h-4 w-4 mr-2" />
-          Add Product
+          {t("products.addProduct")}
         </Button>
       </div>
 
@@ -763,7 +765,7 @@ export function Products() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
-            placeholder="Search products..."
+            placeholder={t("products.search")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
@@ -774,10 +776,10 @@ export function Products() {
             <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="ACTIVE">Active</SelectItem>
-            <SelectItem value="DRAFT">Draft</SelectItem>
-            <SelectItem value="ARCHIVED">Archived</SelectItem>
+            <SelectItem value="all">{t("products.status.all")}</SelectItem>
+            <SelectItem value="ACTIVE">{t("products.status.active")}</SelectItem>
+            <SelectItem value="DRAFT">{t("products.status.draft")}</SelectItem>
+            <SelectItem value="ARCHIVED">{t("products.status.archived")}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={marketplaceFilter} onValueChange={(v) => { setMarketplaceFilter(v); setPage(1); }}>
@@ -848,9 +850,9 @@ export function Products() {
           ) : products.length === 0 ? (
             <div className="text-center py-16">
               <Package className="h-16 w-16 text-slate-200 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-slate-700">No products yet</h3>
+              <h3 className="text-lg font-medium text-slate-700">{t("products.empty")}</h3>
               <p className="text-slate-400 text-sm mt-1 mb-4">
-                Add products manually or sync from a connected marketplace
+                {t("products.emptyHint")}
               </p>
               <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700 text-white">
                 <Plus className="h-4 w-4 mr-2" />

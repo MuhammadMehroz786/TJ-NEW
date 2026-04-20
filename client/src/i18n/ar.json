@@ -145,6 +145,69 @@
   "sidebar": {
     "loggedInAs": "تسجيل الدخول كـ"
   },
+  "dashboard": {
+    "welcome": "أهلاً بعودتك يا {{name}}",
+    "subtitle": "إليك ما يحدث مع منتجاتك اليوم.",
+    "stats": {
+      "totalProducts": "إجمالي المنتجات",
+      "activeProducts": "المنتجات النشطة",
+      "marketplaces": "المتاجر",
+      "draftProducts": "المسودات",
+      "campaigns": "الحملات"
+    },
+    "recentActivity": "النشاط الأخير",
+    "noActivity": "لا يوجد نشاط حديث",
+    "noActivityHint": "ستظهر إجراءاتك الأخيرة هنا.",
+    "timeJustNow": "الآن",
+    "timeMinutes": "قبل {{n}} د",
+    "timeHours": "قبل {{n}} س",
+    "timeDays": "قبل {{n}} يوم"
+  },
+  "settings": {
+    "title": "الإعدادات",
+    "subtitle": "أدر حسابك وتفضيلاتك",
+    "profile": "الملف الشخصي",
+    "profileSubtitle": "حدّث معلوماتك الشخصية",
+    "nameLabel": "الاسم الكامل",
+    "emailLabel": "البريد الإلكتروني",
+    "saveProfile": "حفظ التغييرات",
+    "savingProfile": "جارٍ الحفظ...",
+    "password": "كلمة المرور",
+    "passwordSubtitle": "غيّر كلمة مرورك",
+    "currentPassword": "كلمة المرور الحالية",
+    "newPassword": "كلمة المرور الجديدة",
+    "newPasswordHint": "6 أحرف على الأقل",
+    "changePassword": "تغيير كلمة المرور",
+    "changingPassword": "جارٍ التحديث..."
+  },
+  "products": {
+    "title": "المنتجات",
+    "subtitle": "أدر قائمتك وزامنها مع المتاجر",
+    "addProduct": "إضافة منتج",
+    "syncFrom": "مزامنة من",
+    "search": "ابحث في المنتجات...",
+    "status": {
+      "all": "كل الحالات",
+      "active": "نشط",
+      "draft": "مسودة",
+      "archived": "مؤرشف"
+    },
+    "cols": {
+      "image": "الصورة",
+      "title": "العنوان",
+      "price": "السعر",
+      "status": "الحالة",
+      "marketplace": "المتجر",
+      "updated": "آخر تحديث"
+    },
+    "empty": "لا توجد منتجات",
+    "emptyHint": "أضف منتجات يدوياً أو زامن من متجر متصل",
+    "selected": "{{count}} محدّد",
+    "pushTo": "دفع إلى {{store}}",
+    "pushing": "جارٍ الدفع...",
+    "delete": "حذف",
+    "confirm": "هل أنت متأكد؟"
+  },
   "toast": {
     "saved": "تم الحفظ",
     "deleted": "تم الحذف",

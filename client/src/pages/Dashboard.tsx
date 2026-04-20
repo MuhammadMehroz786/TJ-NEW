@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import api from "@/lib/api";
+import { useTranslation } from "react-i18next";
 
 interface DashboardStats {
   totalProducts: number;
@@ -17,6 +18,7 @@ interface DashboardStats {
 
 export function Dashboard() {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -29,56 +31,31 @@ export function Dashboard() {
   }, []);
 
   const statCards = [
-    {
-      label: "Total Products",
-      value: stats?.totalProducts ?? 0,
-      icon: Package,
-      color: "text-blue-600 bg-blue-50",
-    },
-    {
-      label: "Active Products",
-      value: stats?.activeProducts ?? 0,
-      icon: ShoppingBag,
-      color: "text-teal-600 bg-teal-50",
-    },
-    {
-      label: "Marketplaces",
-      value: stats?.connectedMarketplaces ?? 0,
-      icon: Store,
-      color: "text-purple-600 bg-purple-50",
-    },
-    {
-      label: "Draft Products",
-      value: stats?.draftProducts ?? 0,
-      icon: FileText,
-      color: "text-amber-600 bg-amber-50",
-    },
-    {
-      label: "Campaigns",
-      value: stats?.activeCampaigns ?? 0,
-      icon: Megaphone,
-      color: "text-orange-600 bg-orange-50",
-    },
+    { label: t("dashboard.stats.totalProducts"), value: stats?.totalProducts ?? 0, icon: Package, color: "text-blue-600 bg-blue-50" },
+    { label: t("dashboard.stats.activeProducts"), value: stats?.activeProducts ?? 0, icon: ShoppingBag, color: "text-teal-600 bg-teal-50" },
+    { label: t("dashboard.stats.marketplaces"), value: stats?.connectedMarketplaces ?? 0, icon: Store, color: "text-purple-600 bg-purple-50" },
+    { label: t("dashboard.stats.draftProducts"), value: stats?.draftProducts ?? 0, icon: FileText, color: "text-amber-600 bg-amber-50" },
+    { label: t("dashboard.stats.campaigns"), value: stats?.activeCampaigns ?? 0, icon: Megaphone, color: "text-orange-600 bg-orange-50" },
   ];
 
   const formatTime = (ts: string) => {
     const diff = Date.now() - new Date(ts).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "Just now";
-    if (mins < 60) return `${mins}m ago`;
+    if (mins < 1) return t("dashboard.timeJustNow");
+    if (mins < 60) return t("dashboard.timeMinutes", { n: mins });
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.floor(hours / 24)}d ago`;
+    if (hours < 24) return t("dashboard.timeHours", { n: hours });
+    return t("dashboard.timeDays", { n: Math.floor(hours / 24) });
   };
 
   return (
     <div>
       <div className="mb-8">
         <h1 className="text-2xl font-semibold text-slate-900">
-          Welcome back, {user?.name?.split(" ")[0]}
+          {t("dashboard.welcome", { name: user?.name?.split(" ")[0] ?? "" })}
         </h1>
         <p className="text-slate-500 mt-1">
-          Here's what's happening with your products today.
+          {t("dashboard.subtitle")}
         </p>
       </div>
 
@@ -110,7 +87,7 @@ export function Dashboard() {
         <CardHeader className="pb-3">
           <CardTitle className="text-lg font-semibold text-slate-900 flex items-center gap-2">
             <Clock className="h-5 w-5 text-slate-400" />
-            Recent Activity
+            {t("dashboard.recentActivity")}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -149,9 +126,9 @@ export function Dashboard() {
           ) : (
             <div className="text-center py-12">
               <Package className="h-12 w-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500 text-sm">No activity yet</p>
+              <p className="text-slate-500 text-sm">{t("dashboard.noActivity")}</p>
               <p className="text-slate-400 text-xs mt-1">
-                Connect a marketplace and sync products to get started
+                {t("dashboard.noActivityHint")}
               </p>
             </div>
           )}

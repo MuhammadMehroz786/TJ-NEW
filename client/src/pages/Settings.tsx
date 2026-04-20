@@ -7,9 +7,11 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import api from "@/lib/api";
+import { useTranslation } from "react-i18next";
 
 export function Settings() {
   const { user, updateUser } = useAuth();
+  const { t } = useTranslation();
   const [name, setName] = useState(user?.name || "");
   const [email, setEmail] = useState(user?.email || "");
   const [savingProfile, setSavingProfile] = useState(false);
@@ -66,25 +68,25 @@ export function Settings() {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
-        <p className="text-slate-500 text-sm mt-1">Manage your account settings</p>
+        <h1 className="text-2xl font-semibold text-slate-900">{t("settings.title")}</h1>
+        <p className="text-slate-500 text-sm mt-1">{t("settings.subtitle")}</p>
       </div>
 
       <div className="max-w-2xl space-y-6">
         {/* Profile */}
         <Card className="border-slate-200/60">
           <CardHeader>
-            <CardTitle className="text-lg">Profile</CardTitle>
-            <CardDescription>Update your personal information</CardDescription>
+            <CardTitle className="text-lg">{t("settings.profile")}</CardTitle>
+            <CardDescription>{t("settings.profileSubtitle")}</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleProfile} className="space-y-4">
               <div className="space-y-2">
-                <Label>Full Name</Label>
+                <Label>{t("settings.nameLabel")}</Label>
                 <Input value={name} onChange={(e) => setName(e.target.value)} required />
               </div>
               <div className="space-y-2">
-                <Label>Email</Label>
+                <Label>{t("settings.emailLabel")}</Label>
                 <Input
                   type="email"
                   value={email}
@@ -97,7 +99,7 @@ export function Settings() {
                 className="bg-teal-600 hover:bg-teal-700 text-white"
                 disabled={savingProfile}
               >
-                {savingProfile ? "Saving..." : "Save Changes"}
+                {savingProfile ? t("settings.savingProfile") : t("settings.saveProfile")}
               </Button>
             </form>
           </CardContent>
@@ -108,13 +110,13 @@ export function Settings() {
         {/* Password */}
         <Card className="border-slate-200/60">
           <CardHeader>
-            <CardTitle className="text-lg">Change Password</CardTitle>
-            <CardDescription>Update your password to keep your account secure</CardDescription>
+            <CardTitle className="text-lg">{t("settings.password")}</CardTitle>
+            <CardDescription>{t("settings.passwordSubtitle")}</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handlePassword} className="space-y-4">
               <div className="space-y-2">
-                <Label>Current Password</Label>
+                <Label>{t("settings.currentPassword")}</Label>
                 <Input
                   type="password"
                   value={currentPassword}
@@ -123,17 +125,18 @@ export function Settings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>New Password</Label>
+                <Label>{t("settings.newPassword")}</Label>
                 <Input
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
                   minLength={6}
+                  placeholder={t("settings.newPasswordHint")}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Confirm New Password</Label>
+                <Label>{t("settings.newPassword")}</Label>
                 <Input
                   type="password"
                   value={confirmPassword}
@@ -147,7 +150,7 @@ export function Settings() {
                 className="bg-teal-600 hover:bg-teal-700 text-white"
                 disabled={savingPassword}
               >
-                {savingPassword ? "Updating..." : "Update Password"}
+                {savingPassword ? t("settings.changingPassword") : t("settings.changePassword")}
               </Button>
             </form>
           </CardContent>

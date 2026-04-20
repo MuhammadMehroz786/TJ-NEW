@@ -145,6 +145,69 @@
   "sidebar": {
     "loggedInAs": "Logged in as"
   },
+  "dashboard": {
+    "welcome": "Welcome back, {{name}}",
+    "subtitle": "Here's what's happening with your products today.",
+    "stats": {
+      "totalProducts": "Total Products",
+      "activeProducts": "Active Products",
+      "marketplaces": "Marketplaces",
+      "draftProducts": "Draft Products",
+      "campaigns": "Campaigns"
+    },
+    "recentActivity": "Recent Activity",
+    "noActivity": "No recent activity",
+    "noActivityHint": "Your recent actions will appear here.",
+    "timeJustNow": "Just now",
+    "timeMinutes": "{{n}}m ago",
+    "timeHours": "{{n}}h ago",
+    "timeDays": "{{n}}d ago"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Manage your account and preferences",
+    "profile": "Profile",
+    "profileSubtitle": "Update your personal information",
+    "nameLabel": "Full Name",
+    "emailLabel": "Email",
+    "saveProfile": "Save changes",
+    "savingProfile": "Saving...",
+    "password": "Password",
+    "passwordSubtitle": "Change your password",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "newPasswordHint": "At least 6 characters",
+    "changePassword": "Change password",
+    "changingPassword": "Updating..."
+  },
+  "products": {
+    "title": "Products",
+    "subtitle": "Manage your catalog and sync with marketplaces",
+    "addProduct": "Add product",
+    "syncFrom": "Sync from",
+    "search": "Search products...",
+    "status": {
+      "all": "All statuses",
+      "active": "Active",
+      "draft": "Draft",
+      "archived": "Archived"
+    },
+    "cols": {
+      "image": "Image",
+      "title": "Title",
+      "price": "Price",
+      "status": "Status",
+      "marketplace": "Marketplace",
+      "updated": "Updated"
+    },
+    "empty": "No products yet",
+    "emptyHint": "Add products manually or sync from a connected marketplace",
+    "selected": "{{count}} selected",
+    "pushTo": "Push to {{store}}",
+    "pushing": "Pushing...",
+    "delete": "Delete",
+    "confirm": "Are you sure?"
+  },
   "toast": {
     "saved": "Saved",
     "deleted": "Deleted",
