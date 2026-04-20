@@ -43,6 +43,37 @@ const backgroundScenes: Record<string, string> = {
     "a smooth seamless gradient background transitioning from soft warm white to light grey, with subtle ambient lighting from above creating a gentle shadow beneath the product",
 };
 
+// Shot types — vary framing / composition / camera angle rather than background.
+// Used by the Merchant Pack feature to generate a gallery of looks for the same
+// product from ONE upload. Each shot re-uses the SAME product but with a
+// different composition + scene hint.
+const shotTypes: Record<string, { scene: string; composition: string }> = {
+  hero: {
+    scene: "a clean pure white studio background with professional three-point lighting",
+    composition: "a centered hero product shot with the product filling roughly 70% of the frame, slight elevated camera angle, crisp sharp focus edge-to-edge",
+  },
+  macro: {
+    scene: "a soft out-of-focus neutral studio background",
+    composition: "an extreme close-up macro detail shot focusing on the product's texture, material, and finest details, with shallow depth of field emphasizing craftsmanship",
+  },
+  lifestyle_kitchen: {
+    scene: "a bright modern kitchen counter with Carrara marble, natural window light, and softly blurred kitchenware in the background",
+    composition: "a natural lifestyle angle showing the product in use context, slight 3/4 angle, warm ambient feeling",
+  },
+  lifestyle_outdoor: {
+    scene: "an outdoor golden-hour setting with a natural wooden surface, warm directional sunlight, and a lush greenery bokeh background",
+    composition: "a lifestyle context shot during golden hour, slight 3/4 angle, warm inviting atmosphere",
+  },
+  minimal: {
+    scene: "a minimal seamless pastel-cream backdrop with soft directional light from the top-left",
+    composition: "a clean editorial catalog shot with generous negative space around the product, centered",
+  },
+  flat_lay: {
+    scene: "a flat-lay overhead composition on a light neutral surface (pale wood or matte cream) with soft even top-down lighting",
+    composition: "a top-down flat-lay shot with the product centered, minimal shadows, editorial catalog style",
+  },
+};
+
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB decoded
 
 function detectImageMime(buf: Buffer): "image/png" | "image/jpeg" | "image/webp" | null {
@@ -361,6 +392,242 @@ STRICT RULES:
       return;
     }
     res.status(500).json({ error: "Failed to enhance image", code: "ENHANCE_ERROR" });
+  }
+});
+
+// ── Merchant Pack — one upload, many shots ────────────────────────────────────
+// Given a single image, generate N variants in parallel: different compositions,
+// backgrounds, framings. Each shot = one Gemini call = one credit. Failures are
+// refunded individually; successes are persisted individually.
+//
+// Body: { image: base64 data URI, scenes: string[] (background or shot names), folderId? }
+// Response: { results: AiStudioImage[], failures: { scene, error }[], remainingCredits, ... }
+
+function buildShotPrompt(sceneName: string): string {
+  const shotType = shotTypes[sceneName];
+  const bg = backgroundScenes[sceneName];
+  const sceneDescription = shotType?.scene || bg || backgroundScenes.studio;
+  const composition = shotType?.composition || "keep the product centered and properly composed with professional e-commerce framing";
+
+  return `You are a professional e-commerce product photographer. Edit this product image following these strict rules:
+
+PRODUCT PRESERVATION (most important):
+- Keep the product EXACTLY as it is — same shape, size, proportions, colors, textures, labels, and details.
+- Do NOT alter, regenerate, distort, or artistically reinterpret the product in any way.
+
+SCENE & BACKGROUND:
+- Completely remove the existing background.
+- Replace it with: ${sceneDescription}.
+- The new background must look photorealistic.
+
+COMPOSITION:
+- ${composition}
+
+LIGHTING & SHADOWS:
+- Adjust the product's lighting to match the new environment.
+- Add realistic soft contact shadows beneath the product matching the light direction.
+- Ensure consistent color temperature between product and background.
+
+IMAGE QUALITY:
+- Output a sharp, high-resolution, professional e-commerce photograph.
+
+STRICT RULES:
+- Do NOT add text, watermarks, logos, or branding.
+- Do NOT add extra objects or props beyond what the scene describes.
+- The result must look like an authentic photograph, not a composite.`;
+}
+
+// Preset "packs" — lists of shot names for one-click multi-generation
+const presetPacks: Record<string, string[]> = {
+  starter:  ["hero", "lifestyle_kitchen", "macro"],
+  full:     ["hero", "lifestyle_kitchen", "lifestyle_outdoor", "macro", "flat_lay"],
+  catalog:  ["studio", "minimal", "gradient"],
+  lifestyle: ["lifestyle_kitchen", "lifestyle_outdoor", "hero"],
+};
+
+const MAX_PACK_SIZE = 6; // cap concurrent Gemini calls per request
+
+router.post("/enhance-pack", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { image, scenes, preset, folderId } = req.body as {
+      image?: string;
+      scenes?: string[];
+      preset?: string;
+      folderId?: string | null;
+    };
+
+    if (!image) {
+      res.status(400).json({ error: "Please upload an image first", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    // Resolve scenes — accept either explicit list or preset name
+    let sceneList: string[] = Array.isArray(scenes) ? scenes.filter((s) => typeof s === "string") : [];
+    if (preset && typeof preset === "string" && presetPacks[preset]) {
+      sceneList = presetPacks[preset];
+    }
+    sceneList = sceneList.slice(0, MAX_PACK_SIZE);
+    if (sceneList.length === 0) {
+      res.status(400).json({ error: "scenes[] or a valid preset is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    // Validate each requested scene is real
+    const validScenes = sceneList.filter((s) => shotTypes[s] || backgroundScenes[s]);
+    if (validScenes.length === 0) {
+      res.status(400).json({ error: "No valid scenes provided", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      res.status(500).json({ error: "GEMINI_API_KEY is not set", code: "CONFIG_ERROR" });
+      return;
+    }
+
+    // Validate image bytes before consuming any credits
+    let parsedInput: { mimeType: string; base64: string; ext: string };
+    try {
+      parsedInput = parseBase64Image(image);
+    } catch (err) {
+      if (err instanceof ImageValidationError) {
+        res.status(err.status).json({ error: err.message, code: err.code });
+        return;
+      }
+      throw err;
+    }
+
+    // Resolve target folder once
+    let selectedFolderId: string | null = null;
+    if (folderId) {
+      const folder = await prisma.aiStudioFolder.findFirst({
+        where: { id: folderId, userId: req.auth!.userId },
+        select: { id: true },
+      });
+      if (folder) selectedFolderId = folder.id;
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    // Try to consume enough credits for all requested scenes up front. If the
+    // user has fewer credits than scenes, only generate what they can afford.
+    // Each successful consume records its pool so we can refund the right one.
+    type Consumed = { usedPool: "weekly" | "purchased" };
+    const consumes: Consumed[] = [];
+    try {
+      for (let i = 0; i < validScenes.length; i++) {
+        const usage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
+        consumes.push({ usedPool: usage.usedPool });
+      }
+    } catch (err) {
+      if (err instanceof AICreditError) {
+        // ran out mid-reserve; we keep what we already consumed and generate only those
+        // (sceneList truncated below)
+      } else {
+        throw err;
+      }
+    }
+    const affordable = consumes.length;
+    const scenesToGenerate = validScenes.slice(0, affordable);
+    const skipped = validScenes.slice(affordable).map((s) => ({ scene: s, reason: "insufficient_credits" as const }));
+    if (scenesToGenerate.length === 0) {
+      res.status(402).json({
+        error: "You don't have enough credits for any shots in this pack.",
+        code: "INSUFFICIENT_CREDITS",
+      });
+      return;
+    }
+
+    // Run all Gemini calls in parallel. Each item's outcome is independent.
+    const results = await Promise.all(
+      scenesToGenerate.map(async (sceneName, idx) => {
+        try {
+          const prompt = buildShotPrompt(sceneName);
+          const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash-image",
+            contents: [{ inlineData: { mimeType: parsedInput.mimeType, data: parsedInput.base64 } }, prompt],
+            config: { responseModalities: ["image", "text"] },
+          });
+          const parts = response.candidates?.[0]?.content?.parts;
+          if (!parts) throw new Error("No response parts returned.");
+          const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
+          if (!imagePart?.inlineData?.data) throw new Error("No image data in response.");
+
+          const rawMime = imagePart.inlineData.mimeType || "image/png";
+          const extMap: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+          const outputMime = extMap[rawMime] ? rawMime : "image/png";
+          const outputExt = extMap[outputMime] || "png";
+          const outputBase64 = imagePart.inlineData.data as string;
+
+          const randomId = crypto.randomUUID();
+          const relativePath = path.join("ai-studio", req.auth!.userId, `${Date.now()}-${idx}-${randomId}.${outputExt}`);
+          const normalizedPath = relativePath.replaceAll("\\", "/");
+          await saveBase64ToStorage(outputBase64, normalizedPath);
+
+          const record = await prisma.aiStudioImage.create({
+            data: {
+              userId: req.auth!.userId,
+              folderId: selectedFolderId,
+              imagePath: normalizedPath,
+              imageUrl: `/media/${normalizedPath}`,
+              background: sceneName,
+            },
+            include: { folder: { select: { id: true, name: true } } },
+          });
+
+          return { ok: true as const, scene: sceneName, record };
+        } catch (e) {
+          return { ok: false as const, scene: sceneName, error: (e as Error).message || "generation failed" };
+        }
+      }),
+    );
+
+    // Refund failed shots (consumes was 1:1 with scenesToGenerate, in order)
+    const failures: { scene: string; error: string }[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (!r.ok) {
+        failures.push({ scene: r.scene, error: r.error });
+        try { await refundOneCredit(prisma, req.auth!.userId, consumes[i].usedPool); } catch { /* best-effort */ }
+      }
+    }
+
+    const successful = results.filter((r): r is { ok: true; scene: string; record: any } => r.ok).map((r) => signRecord(r.record));
+
+    // Final balance for the response so the client can update its credit display
+    const freshUser = await prisma.user.findUnique({
+      where: { id: req.auth!.userId },
+      select: { aiCredits: true, purchasedCredits: true },
+    });
+
+    res.status(successful.length > 0 ? 201 : 500).json({
+      results: successful,
+      failures: [...failures, ...skipped.map((s) => ({ scene: s.scene, error: "Not enough credits" }))],
+      scenesRequested: validScenes.length,
+      scenesGenerated: successful.length,
+      weeklyCredits: freshUser?.aiCredits ?? null,
+      purchasedCredits: freshUser?.purchasedCredits ?? null,
+      remainingCredits: (freshUser?.aiCredits ?? 0) + (freshUser?.purchasedCredits ?? 0),
+    });
+  } catch (err: any) {
+    if (err instanceof AICreditError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    console.error("AI Studio pack error:", err);
+    res.status(500).json({ error: "Failed to generate pack", code: "ENHANCE_PACK_ERROR" });
+  }
+});
+
+// GET /api/ai-studio/presets — list available packs + shot types
+router.get("/presets", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    res.json({
+      presets: Object.entries(presetPacks).map(([id, scenes]) => ({ id, scenes, count: scenes.length })),
+      shotTypes: Object.keys(shotTypes),
+      backgrounds: Object.keys(backgroundScenes),
+    });
+  } catch {
+    res.status(500).json({ error: "Failed to load presets", code: "INTERNAL_ERROR" });
   }
 });
 

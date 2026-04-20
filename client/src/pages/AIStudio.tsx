@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Download, FolderPlus, ImagePlus, Loader2, Pencil, Plus, Search, Sparkles, Trash2, X, Wallet } from "lucide-react";
+import { Check, Download, FolderPlus, ImagePlus, Loader2, Package, Pencil, Plus, Search, Sparkles, Trash2, X, Wallet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import api from "@/lib/api";
-import { startEnhanceJob, startRefineJob, subscribeToResults } from "@/lib/aiStudioJobs";
+import { startEnhanceJob, startRefineJob, startPackJob, subscribeToResults } from "@/lib/aiStudioJobs";
 import { AiStudioJobsPill } from "@/components/AiStudioJobsPill";
 
 interface AiStudioImage {
@@ -56,6 +56,7 @@ export function AIStudio() {
   const [previewImage, setPreviewImage] = useState<AiStudioImage | null>(null);
   const [newlyEnhanced, setNewlyEnhanced] = useState<AiStudioImage | null>(null);
   const [savingEnhanceFolder, setSavingEnhanceFolder] = useState("none");
+  const [packPreset, setPackPreset] = useState<"starter" | "full" | "catalog" | "lifestyle">("starter");
   const [refineInstruction, setRefineInstruction] = useState("");
   const [refineHistory, setRefineHistory] = useState<AiStudioImage[]>([]);
   const [undoing, setUndoing] = useState(false);
@@ -86,13 +87,33 @@ export function AIStudio() {
       .catch(() => {});
   }, [fetchFolders, fetchImages]);
 
-  // Listen for background enhance/refine results → update gallery + credits
+  // Listen for background enhance/refine/pack results → update gallery + credits
   useEffect(() => {
     return subscribeToResults((r) => {
       if (r.type === "error") {
         toast.error(r.error);
         return;
       }
+
+      if (r.type === "pack") {
+        // Prepend all successful pack shots at once, de-duped
+        const newIds = new Set(r.results.map((img) => img.id));
+        setImages((prev) => [...r.results, ...prev.filter((img) => !newIds.has(img.id))]);
+        if (typeof r.remainingCredits === "number") setAiCredits(r.remainingCredits);
+        if (typeof r.weeklyCredits === "number") setWeeklyCredits(r.weeklyCredits);
+        if (typeof r.purchasedCredits === "number") setPurchasedCredits(r.purchasedCredits);
+        fetchFolders();
+
+        if (r.scenesGenerated > 0 && r.failures.length === 0) {
+          toast.success(`Pack ready — ${r.scenesGenerated} shots generated`);
+        } else if (r.scenesGenerated > 0 && r.failures.length > 0) {
+          toast.info(`Pack partially done — ${r.scenesGenerated}/${r.scenesRequested} shots. ${r.failures.length} failed.`);
+        } else {
+          toast.error(`Pack failed — ${r.failures[0]?.error || "no shots generated"}`);
+        }
+        return;
+      }
+
       const refined = r.result;
       setImages((prev) => [refined, ...prev.filter((img) => img.id !== refined.id)]);
       if (typeof r.remainingCredits === "number") setAiCredits(r.remainingCredits);
@@ -101,7 +122,6 @@ export function AIStudio() {
       fetchFolders();
 
       if (r.job.type === "refine" && r.refineSourceImageId) {
-        // If preview dialog is open on the source image, swap to the refined version
         setPreviewImage((current) => {
           if (!current) return current;
           if (current.id === r.refineSourceImageId) {
@@ -157,6 +177,29 @@ export function AIStudio() {
     }
     setSelectedImages([]);
     toast.info(count === 1 ? "Enhancement started — you can keep working" : `Enhancing ${count} images in the background`);
+  };
+
+  const handleGeneratePack = () => {
+    if (selectedImages.length === 0) return toast.error("Please upload an image first");
+    if (selectedImages.length > 1) {
+      toast.info("Pack mode uses only the first uploaded image — generating a pack from it.");
+    }
+    const image = selectedImages[0];
+    const folderId = selectedFolderId === "all" ? null : selectedFolderId;
+    const labels: Record<string, string> = {
+      starter: "Starter pack (3 shots)",
+      full: "Full merchant pack (5 shots)",
+      catalog: "Catalog pack (3 shots)",
+      lifestyle: "Lifestyle pack (3 shots)",
+    };
+    startPackJob({
+      image,
+      preset: packPreset,
+      folderId,
+      label: labels[packPreset] || "Generating pack",
+    });
+    setSelectedImages([]);
+    toast.info(`${labels[packPreset]} started — you can keep working.`);
   };
 
   const handleRefine = (instruction: string) => {
@@ -369,6 +412,26 @@ export function AIStudio() {
                 <Button onClick={handleEnhance} disabled={selectedImages.length === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
                   <Sparkles className="h-4 w-4 mr-2" />Enhance All & Save
                 </Button>
+                <div className="flex items-center gap-1 pl-2 border-l border-slate-200">
+                  <Select value={packPreset} onValueChange={(v) => setPackPreset(v as typeof packPreset)}>
+                    <SelectTrigger className="w-[180px]"><SelectValue placeholder="Pack preset" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="starter">Starter (3 shots)</SelectItem>
+                      <SelectItem value="full">Full merchant pack (5)</SelectItem>
+                      <SelectItem value="catalog">Catalog (3 shots)</SelectItem>
+                      <SelectItem value="lifestyle">Lifestyle (3 shots)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    onClick={handleGeneratePack}
+                    disabled={selectedImages.length === 0}
+                    className="border-purple-200 text-purple-700 hover:bg-purple-50"
+                    title="Generate a full gallery of shots from one product image"
+                  >
+                    <Package className="h-4 w-4 mr-2" />Generate Pack
+                  </Button>
+                </div>
               </div>
 
               <div className="flex items-center gap-3 mt-5 mb-3">

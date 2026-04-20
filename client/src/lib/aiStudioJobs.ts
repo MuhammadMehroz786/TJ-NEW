@@ -13,7 +13,7 @@ export interface AiStudioImage {
   folder?: { id: string; name: string } | null;
 }
 
-type JobType = "enhance" | "refine";
+type JobType = "enhance" | "refine" | "pack";
 
 export interface Job {
   id: string;
@@ -32,13 +32,25 @@ interface JobResultSuccess {
   refineSourceImageId?: string; // for refine jobs — the source image id
 }
 
+interface JobResultPack {
+  type: "pack";
+  job: Job;
+  results: AiStudioImage[];
+  failures: { scene: string; error: string }[];
+  scenesRequested: number;
+  scenesGenerated: number;
+  remainingCredits?: number;
+  weeklyCredits?: number;
+  purchasedCredits?: number;
+}
+
 interface JobResultError {
   type: "error";
   job: Job;
   error: string;
 }
 
-type JobResult = JobResultSuccess | JobResultError;
+type JobResult = JobResultSuccess | JobResultError | JobResultPack;
 
 type Listener = () => void;
 type ResultListener = (result: JobResult) => void;
@@ -157,6 +169,54 @@ export function startRefineJob(params: {
         weeklyCredits: res.data?.weeklyCredits,
         purchasedCredits: res.data?.purchasedCredits,
         refineSourceImageId: params.imageId,
+      });
+    })
+    .catch((err: unknown) => {
+      pendingJobs.delete(job.id);
+      emitChange();
+      emitResult({ type: "error", job, error: extractError(err) });
+    });
+
+  return job;
+}
+
+export function startPackJob(params: {
+  image: string;
+  preset?: string;
+  scenes?: string[];
+  folderId: string | null;
+  label?: string;
+}): Job {
+  const sceneCount = params.scenes?.length || 0;
+  const job: Job = {
+    id: uid(),
+    type: "pack",
+    label: params.label || `Generating ${params.preset || sceneCount + " shots"} pack`,
+    startedAt: Date.now(),
+  };
+  pendingJobs.set(job.id, job);
+  emitChange();
+
+  api
+    .post("/ai-studio/enhance-pack", {
+      image: params.image,
+      preset: params.preset,
+      scenes: params.scenes,
+      folderId: params.folderId,
+    }, { timeout: 300000 })
+    .then((res) => {
+      pendingJobs.delete(job.id);
+      emitChange();
+      emitResult({
+        type: "pack",
+        job,
+        results: res.data.results || [],
+        failures: res.data.failures || [],
+        scenesRequested: res.data.scenesRequested || 0,
+        scenesGenerated: res.data.scenesGenerated || 0,
+        remainingCredits: res.data?.remainingCredits,
+        weeklyCredits: res.data?.weeklyCredits,
+        purchasedCredits: res.data?.purchasedCredits,
       });
     })
     .catch((err: unknown) => {
