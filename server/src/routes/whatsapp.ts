@@ -22,6 +22,7 @@ import {
 } from "../services/otp";
 import { refineProductImage, sanitizeInstruction } from "../services/imageRefinement";
 import { addImageToBatch, type PendingImage } from "../services/whatsappBatch";
+import { t, plural, resolveLang, type Lang } from "../services/whatsappI18n";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -29,6 +30,7 @@ const prisma = new PrismaClient();
 const SIGNUP_URL = process.env.WHATSAPP_SIGNUP_URL || "https://app.tijarflow.com/signup";
 
 const STATES = {
+  AWAITING_LANGUAGE: "awaiting_language",
   AWAITING_ACCOUNT_ANSWER: "awaiting_account_answer",
   AWAITING_EMAIL: "awaiting_email",
   AWAITING_OTP: "awaiting_otp",
@@ -113,43 +115,38 @@ async function sendEnhancedImage(to: string, base64: string, mimeType: string, c
   return sendWhatsAppImageById({ to, mediaId, caption });
 }
 
-async function sendWelcomeMessage(to: string): Promise<void> {
+async function sendLanguageGate(to: string): Promise<void> {
+  // Single text message with bilingual copy — no buttons (we want 1/2 input to
+  // double as cross-language shortcuts and keep parsing trivial).
+  await sendWhatsAppTextMessage({
+    to,
+    body: t("en", "language_gate"),
+  });
+}
+
+async function sendWelcomeMessage(to: string, lang: Lang = "en"): Promise<void> {
   await sendWhatsAppButtonsMessage({
     to,
-    body: "Welcome to TijarFlow AI Assistant! 🛍️\n\nSend us your product photos and we'll enhance them with a professional studio background.\n\nAre you already registered on TijarFlow as a merchant?",
+    body: t(lang, "welcome_body"),
     buttons: [
-      { id: "registered_yes", title: "Yes, I'm registered" },
-      { id: "registered_no", title: "No, use free trial" },
+      { id: "registered_yes", title: t(lang, "btn_registered_yes") },
+      { id: "registered_no", title: t(lang, "btn_registered_no") },
     ],
   });
 }
 
-async function sendHelp(to: string): Promise<void> {
-  await sendWhatsAppTextMessage({
-    to,
-    body:
-      "🤖 *TijarFlow Bot Commands*\n\n" +
-      "/start — Restart the conversation\n" +
-      "/clear — Reset your session\n" +
-      "/credits — Check your credit balance\n" +
-      "/new — Start fresh with a new image\n" +
-      "/logout — Unlink your merchant account\n" +
-      "/help — Show this menu\n\n" +
-      "📸 *How to use:*\n" +
-      "• Send one or multiple product images — I'll enhance them all together after 5 seconds.\n" +
-      "• *Reply* to any enhanced image with instructions like _make background darker_ to refine just that one.\n" +
-      "• Or type a new refinement to tweak your most recent image.",
-  });
+async function sendHelp(to: string, lang: Lang = "en"): Promise<void> {
+  await sendWhatsAppTextMessage({ to, body: t(lang, "help") });
 }
 
-async function sendRefinementButtons(to: string): Promise<void> {
+async function sendRefinementButtons(to: string, lang: Lang = "en"): Promise<void> {
   await sendWhatsAppButtonsMessage({
     to,
-    body: "Want to tweak it? Pick a quick refinement or type your own (e.g. _brighter lighting_, _closer crop_, _warmer tones_).",
+    body: t(lang, "refinement_buttons_body"),
     buttons: [
-      { id: "refine_bg",    title: "Change background" },
-      { id: "refine_light", title: "Softer lighting" },
-      { id: "refine_new",   title: "New image" },
+      { id: "refine_bg",    title: t(lang, "btn_refine_bg") },
+      { id: "refine_light", title: t(lang, "btn_refine_light") },
+      { id: "refine_new",   title: t(lang, "btn_refine_new") },
     ],
   });
 }
@@ -206,20 +203,27 @@ type SessionRow = NonNullable<Awaited<ReturnType<typeof prisma.whatsAppSession.f
 async function handleSlashCommand(answer: string, from: string, session: SessionRow): Promise<boolean> {
   if (!answer.startsWith("/")) return false;
   const cmd = answer.split(/\s+/)[0];
+  const lang = resolveLang(session.language);
 
   switch (cmd) {
     case "/help":
     case "/commands":
-      await sendHelp(from);
+      await sendHelp(from, lang);
+      return true;
+
+    case "/language":
+    case "/lang":
+      await prisma.whatsAppSession.update({
+        where: { id: session.id },
+        data: { state: STATES.AWAITING_LANGUAGE },
+      });
+      await sendLanguageGate(from);
       return true;
 
     case "/start":
     case "/restart":
     case "/clear":
     case "/reset":
-      // Preserve the guest credit counter (no farming via /start).
-      // Preserve the merchant link if the user is verified — they shouldn't
-      // have to re-OTP every time they reset the chat. /logout clears both.
       await resetSessionToWelcome(
         session.id,
         true, session.creditsUsed,
@@ -228,10 +232,10 @@ async function handleSlashCommand(answer: string, from: string, session: Session
       if (session.isVerified && session.userId) {
         await sendWhatsAppTextMessage({
           to: from,
-          body: "✅ Session reset — you're still logged in.\n\nSend your product image(s) or type /help.",
+          body: t(lang, "session_reset_logged_in"),
         });
       } else {
-        await sendWelcomeMessage(from);
+        await sendWelcomeMessage(from, lang);
       }
       return true;
 
@@ -241,14 +245,17 @@ async function handleSlashCommand(answer: string, from: string, session: Session
           where: { id: session.id },
           data: { state: STATES.VERIFIED, lastSourceImage: null, lastSourceMimeType: null },
         });
-        await sendWhatsAppTextMessage({ to: from, body: "✨ Ready for a new image. Send your next product photo." });
+        await sendWhatsAppTextMessage({ to: from, body: t(lang, "new_image_ready_verified") });
       } else {
         await prisma.whatsAppSession.update({
           where: { id: session.id },
           data: { state: STATES.AWAITING_GUEST_IMAGE, lastSourceImage: null, lastSourceMimeType: null },
         });
         const remaining = Math.max(0, session.creditsLimit - session.creditsUsed);
-        await sendWhatsAppTextMessage({ to: from, body: `✨ Ready for a new image. Send your next product photo. *${remaining}* free enhancement${remaining === 1 ? "" : "s"} remaining.` });
+        await sendWhatsAppTextMessage({
+          to: from,
+          body: t(lang, "new_image_ready_guest", { remaining, plural: plural(remaining, lang) }),
+        });
       }
       return true;
 
@@ -258,7 +265,7 @@ async function handleSlashCommand(answer: string, from: string, session: Session
         const remaining = Math.max(0, session.creditsLimit - session.creditsUsed);
         await sendWhatsAppTextMessage({
           to: from,
-          body: `💳 Guest credits: *${remaining}* of ${session.creditsLimit} remaining.\n\nType /start to link a merchant account.`,
+          body: t(lang, "credits_guest", { remaining, limit: session.creditsLimit }),
         });
         return true;
       }
@@ -266,10 +273,14 @@ async function handleSlashCommand(answer: string, from: string, session: Session
         const credits = await getAICredits(prisma, session.userId);
         await sendWhatsAppTextMessage({
           to: from,
-          body: `💳 *Your credit balance*\n• Weekly: ${credits.weeklyCredits} (resets Monday)\n• Purchased: ${credits.purchasedCredits}\n• Total: ${credits.totalCredits}`,
+          body: t(lang, "credits_verified", {
+            weekly: credits.weeklyCredits,
+            purchased: credits.purchasedCredits,
+            total: credits.totalCredits,
+          }),
         });
       } catch {
-        await sendWhatsAppTextMessage({ to: from, body: "Could not fetch your credit balance. Please try again." });
+        await sendWhatsAppTextMessage({ to: from, body: t(lang, "credits_fetch_failed") });
       }
       return true;
     }
@@ -277,13 +288,13 @@ async function handleSlashCommand(answer: string, from: string, session: Session
     case "/logout":
     case "/unlink":
       await resetSessionToWelcome(session.id, false, 0);
-      await sendWhatsAppTextMessage({ to: from, body: "✅ You've been logged out. Type /start to begin again." });
+      await sendWhatsAppTextMessage({ to: from, body: t(lang, "logged_out") });
       return true;
 
     default:
       await sendWhatsAppTextMessage({
         to: from,
-        body: `Unknown command: ${cmd}\n\nType /help to see available commands.`,
+        body: t(lang, "unknown_command", { cmd }),
       });
       return true;
   }
@@ -363,11 +374,11 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         session = await prisma.whatsAppSession.create({
           data: {
             phoneNumber: from,
-            state: STATES.AWAITING_ACCOUNT_ANSWER,
+            state: STATES.AWAITING_LANGUAGE,
             lastMessageAt: now,
           },
         });
-        await sendWelcomeMessage(from);
+        await sendLanguageGate(from);
         continue;
       }
 
@@ -375,6 +386,34 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         where: { id: session.id },
         data: { lastMessageAt: now },
       });
+
+      // Language gate — pending first-time choice. Accept "1" / "2" / "en" / "ar"
+      // / "english" / "عربي". Slash commands also work (e.g. /help) so the user
+      // isn't trapped here.
+      if (session.state === STATES.AWAITING_LANGUAGE && !answer.startsWith("/")) {
+        const pickEn = /^(1|en|eng|english)$/i.test(answer);
+        const pickAr = /^(2|ar|ara|arabic|عربي|عربية|العربية)$/.test(answer);
+        if (pickEn || pickAr) {
+          const newLang: Lang = pickEn ? "en" : "ar";
+          const updated = await prisma.whatsAppSession.update({
+            where: { id: session.id },
+            data: {
+              language: newLang,
+              state: STATES.AWAITING_ACCOUNT_ANSWER,
+            },
+          });
+          session = updated;
+          await sendWhatsAppTextMessage({
+            to: from,
+            body: t(newLang, pickEn ? "language_set_en" : "language_set_ar"),
+          });
+          await sendWelcomeMessage(from, newLang);
+          continue;
+        }
+        // Unclear input — re-prompt
+        await sendLanguageGate(from);
+        continue;
+      }
 
       if (await handleSlashCommand(answer, from, session)) continue;
 
@@ -399,9 +438,11 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         }
       }
 
+      const lang = resolveLang(session.language);
+
       if (!session.isVerified && isRestartTrigger(answer)) {
         await resetSessionToWelcome(session.id, false, 0);
-        await sendWelcomeMessage(from);
+        await sendWelcomeMessage(from, lang);
         continue;
       }
 
@@ -411,7 +452,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         } else {
           await sendWhatsAppTextMessage({
             to: from,
-            body: "✅ Send your product image(s) — one or many. After I receive them I'll ask what theme to apply.\n\nType /help for commands.",
+            body: t(lang, "verified_idle_prompt"),
           });
         }
         continue;
@@ -436,14 +477,17 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
               where: { id: session.id },
               data: { state: STATES.VERIFIED, lastSourceImage: null, lastSourceMimeType: null },
             });
-            await sendWhatsAppTextMessage({ to: from, body: "✨ Send your next product image." });
+            await sendWhatsAppTextMessage({ to: from, body: t(lang, "post_enh_followup") });
           } else {
             await prisma.whatsAppSession.update({
               where: { id: session.id },
               data: { state: STATES.AWAITING_GUEST_IMAGE, lastSourceImage: null, lastSourceMimeType: null },
             });
             const remaining = Math.max(0, session.creditsLimit - session.creditsUsed);
-            await sendWhatsAppTextMessage({ to: from, body: `✨ Send your next product image. *${remaining}* free enhancement${remaining === 1 ? "" : "s"} remaining.` });
+            await sendWhatsAppTextMessage({
+              to: from,
+              body: t(lang, "post_enh_followup_guest", { remaining, plural: plural(remaining, lang) }),
+            });
           }
           continue;
         }
@@ -456,31 +500,33 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         if (message.type === "text" && message.text) {
           const instruction = message.text.trim();
           if (instruction.length < 3) {
-            await sendWhatsAppTextMessage({ to: from, body: "Please describe the refinement in a bit more detail (at least 3 characters)." });
+            await sendWhatsAppTextMessage({ to: from, body: t(lang, "theme_too_short") });
             continue;
           }
           await handleRefinement(session, instruction, from, message.contextMessageId);
           continue;
         }
 
-        await sendWhatsAppTextMessage({ to: from, body: "Type a refinement (e.g. _brighter_), tap a button, or send a new image. /new to start over." });
+        await sendWhatsAppTextMessage({ to: from, body: t(lang, "refine_hint_fallback") });
         continue;
       }
 
       if (session.state === STATES.AWAITING_ACCOUNT_ANSWER || session.state === "idle") {
-        if (answer === "yes" || answer === "yes, i'm registered") {
+        if (answer === "yes" || answer === "yes, i'm registered" ||
+            answer === t(lang, "btn_registered_yes").toLowerCase()) {
           await prisma.whatsAppSession.update({
             where: { id: session.id },
             data: { state: STATES.AWAITING_EMAIL, emailAttempts: 0 },
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body: "Please enter the email address you used to register on TijarFlow. We'll send a 6-digit code to verify it's you.",
+            body: t(lang, "enter_email"),
           });
           continue;
         }
 
-        if (answer === "no" || answer === "no, use free trial") {
+        if (answer === "no" || answer === "no, use free trial" ||
+            answer === t(lang, "btn_registered_no").toLowerCase()) {
           // Do NOT reset creditsUsed. 5 free enhancements are lifetime per phone
           // number — a guest who exhausted their trial can't re-trigger it by
           // restarting and answering "No" again.
@@ -499,10 +545,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             });
             await sendWhatsAppTextMessage({
               to: from,
-              body:
-                `You've already used your 5 free enhancements. 🎉\n\n` +
-                `Sign up for TijarFlow to get 50 AI credits every week:\n${SIGNUP_URL}\n\n` +
-                `Or type /start and pick "Yes, I'm registered" to link an existing account.`,
+              body: t(lang, "guest_trial_exhausted", { signup: SIGNUP_URL }),
             });
             continue;
           }
@@ -517,20 +560,18 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body:
-              `Great! You have *${remaining}* free AI enhancement${remaining === 1 ? "" : "s"} left. 🎨\n\n` +
-              `Send me your product image(s) — one or many. After I receive them I'll ask what theme to apply.`,
+            body: t(lang, "guest_trial_started", { remaining, plural: plural(remaining, lang) }),
           });
           continue;
         }
 
-        await sendWelcomeMessage(from);
+        await sendWelcomeMessage(from, lang);
         continue;
       }
 
       if (session.state === STATES.AWAITING_EMAIL) {
         if (message.type !== "text" || !message.text) {
-          await sendWhatsAppTextMessage({ to: from, body: "Please type your registered TijarFlow merchant email address." });
+          await sendWhatsAppTextMessage({ to: from, body: t(lang, "enter_email_text_only") });
           continue;
         }
 
@@ -546,7 +587,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             await resetSessionToWelcome(session.id, false, 0);
             await sendWhatsAppTextMessage({
               to: from,
-              body: `We could not find a merchant account with that email after 3 attempts.\n\nType /start to try again or visit ${SIGNUP_URL} to create an account.`,
+              body: t(lang, "email_not_found_final", { signup: SIGNUP_URL }),
             });
             continue;
           }
@@ -554,9 +595,10 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             where: { id: session.id },
             data: { emailAttempts: attempts },
           });
+          const left = 3 - attempts;
           await sendWhatsAppTextMessage({
             to: from,
-            body: `❌ No merchant account found for that email. ${3 - attempts} attempt${3 - attempts === 1 ? "" : "s"} remaining.`,
+            body: t(lang, "email_not_found_retry", { left, plural: plural(left, lang) }),
           });
           continue;
         }
@@ -568,7 +610,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           console.error("[WhatsApp] OTP email send failed:", (err as Error)?.message || err);
           await sendWhatsAppTextMessage({
             to: from,
-            body: "⚠️ We can't send verification emails right now. Please try again in a few minutes or contact support.",
+            body: t(lang, "otp_email_send_failed"),
           });
           continue;
         }
@@ -588,32 +630,32 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
         await sendWhatsAppTextMessage({
           to: from,
-          body: `📧 A 6-digit verification code has been sent to *${email}*.\n\nReply with the code to link your account (valid for ${OTP_TTL_MINUTES} minutes).`,
+          body: t(lang, "otp_sent", { email, ttl: OTP_TTL_MINUTES }),
         });
         continue;
       }
 
       if (session.state === STATES.AWAITING_OTP) {
         if (message.type !== "text" || !message.text) {
-          await sendWhatsAppTextMessage({ to: from, body: "Please enter the 6-digit verification code sent to your email." });
+          await sendWhatsAppTextMessage({ to: from, body: t(lang, "otp_enter_digits") });
           continue;
         }
 
         const input = message.text.trim().replace(/\D/g, "");
         if (input.length !== 6) {
-          await sendWhatsAppTextMessage({ to: from, body: "The code must be 6 digits. Please try again." });
+          await sendWhatsAppTextMessage({ to: from, body: t(lang, "otp_must_be_6") });
           continue;
         }
 
         if (!session.emailOtpHash || !session.emailOtpExpiresAt || !session.pendingEmail) {
           await resetSessionToWelcome(session.id, false, 0);
-          await sendWelcomeMessage(from);
+          await sendWelcomeMessage(from, lang);
           continue;
         }
 
         if (session.emailOtpExpiresAt.getTime() < Date.now()) {
           await resetSessionToWelcome(session.id, false, 0);
-          await sendWhatsAppTextMessage({ to: from, body: "⏰ That code has expired. Type /start to try again." });
+          await sendWhatsAppTextMessage({ to: from, body: t(lang, "otp_expired") });
           continue;
         }
 
@@ -623,7 +665,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             await resetSessionToWelcome(session.id, false, 0);
             await sendWhatsAppTextMessage({
               to: from,
-              body: `❌ Too many invalid codes. Type /start to begin again.`,
+              body: t(lang, "otp_too_many_attempts"),
             });
             continue;
           }
@@ -631,9 +673,10 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             where: { id: session.id },
             data: { otpAttempts: attempts },
           });
+          const left = OTP_MAX_ATTEMPTS - attempts;
           await sendWhatsAppTextMessage({
             to: from,
-            body: `❌ Incorrect code. ${OTP_MAX_ATTEMPTS - attempts} attempt${OTP_MAX_ATTEMPTS - attempts === 1 ? "" : "s"} remaining.`,
+            body: t(lang, "otp_incorrect", { left, plural: plural(left, lang) }),
           });
           continue;
         }
@@ -644,7 +687,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         });
         if (!user) {
           await resetSessionToWelcome(session.id, false, 0);
-          await sendWhatsAppTextMessage({ to: from, body: "That account is no longer available. Type /start to try again." });
+          await sendWhatsAppTextMessage({ to: from, body: t(lang, "account_unavailable") });
           continue;
         }
 
@@ -664,14 +707,20 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         let creditsInfo = "";
         try {
           const credits = await getAICredits(prisma, user.id);
-          creditsInfo = `\n\n💳 Credits: ${credits.weeklyCredits} weekly${credits.purchasedCredits > 0 ? ` + ${credits.purchasedCredits} purchased` : ""}.`;
+          const purchasedSuffix = credits.purchasedCredits > 0
+            ? t(lang, "credits_info_purchased_suffix", { purchased: credits.purchasedCredits })
+            : "";
+          creditsInfo = t(lang, "credits_info_verified", {
+            weekly: credits.weeklyCredits,
+            purchased: purchasedSuffix,
+          });
         } catch {
           // non-critical
         }
 
         await sendWhatsAppTextMessage({
           to: from,
-          body: `✅ Welcome back, ${user.name}! Your account is now linked.${creditsInfo}\n\nSend your product image(s). After you're done I'll ask what theme to apply.`,
+          body: t(lang, "verified_welcome", { name: user.name, creditsInfo }),
         });
         continue;
       }
@@ -686,7 +735,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body: `✨ Added to your batch (${session.pendingImageIds.length + 1} total). Send the theme text to start enhancement.`,
+            body: t(lang, "batch_added", { count: session.pendingImageIds.length + 1 }),
           });
           continue;
         }
@@ -694,13 +743,13 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         if (message.type !== "text" || !message.text) {
           await sendWhatsAppTextMessage({
             to: from,
-            body: "Please describe the theme as a text message. Example: _clean white studio background_",
+            body: t(lang, "theme_text_only"),
           });
           continue;
         }
         const theme = sanitizeInstruction(message.text);
         if (theme.length < 3) {
-          await sendWhatsAppTextMessage({ to: from, body: "Please provide a more descriptive theme (at least 3 characters)." });
+          await sendWhatsAppTextMessage({ to: from, body: t(lang, "theme_too_short") });
           continue;
         }
         if (session.pendingImageIds.length === 0) {
@@ -711,7 +760,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body: "I don't have any pending images — please send an image first.",
+            body: t(lang, "theme_no_images"),
           });
           continue;
         }
@@ -734,7 +783,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
           });
           await sendWhatsAppTextMessage({
             to: from,
-            body: `Your 5 free enhancements are used up! 🎉\n\nSign up for TijarFlow to get 50 AI credits every week:\n${SIGNUP_URL}\n\nAlready have an account? Type /start and pick "Yes, I'm registered".`,
+            body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
           });
           continue;
         }
@@ -742,7 +791,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         if (message.type !== "image" || !message.imageId) {
           await sendWhatsAppTextMessage({
             to: from,
-            body: `You have *${creditsRemaining}* free enhancement${creditsRemaining === 1 ? "" : "s"} remaining.\n\nSend a product image to use one! 📸`,
+            body: t(lang, "guest_remaining_hint", { remaining: creditsRemaining, plural: plural(creditsRemaining, lang) }),
           });
           continue;
         }
@@ -753,7 +802,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
 
       // Fallback
       await resetSessionToWelcome(session.id, false, 0);
-      await sendWelcomeMessage(from);
+      await sendWelcomeMessage(from, lang);
       } catch (msgErr) {
         const err = msgErr as Error;
         console.error(
@@ -782,6 +831,7 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
  * pick up.
  */
 async function enqueueImage(session: SessionRow, imageId: string, from: string): Promise<void> {
+  const lang = resolveLang(session.language);
   const result = addImageToBatch(from, imageId, async (phoneNumber, images) => {
     const freshSession = await prisma.whatsAppSession.findUnique({ where: { phoneNumber } });
     if (!freshSession) return;
@@ -791,7 +841,7 @@ async function enqueueImage(session: SessionRow, imageId: string, from: string):
   if (result.newBatch) {
     await sendWhatsAppTextMessage({
       to: from,
-      body: "✨ Got your image! Send more if you want — I'll ask for the theme after a few seconds of silence.",
+      body: t(lang, "batch_first_image"),
     });
   }
 }
@@ -803,6 +853,7 @@ async function enqueueImage(session: SessionRow, imageId: string, from: string):
  */
 async function askForBatchTheme(session: SessionRow, images: PendingImage[], from: string): Promise<void> {
   if (images.length === 0) return;
+  const lang = resolveLang(session.language);
   const imageIds = images.map((i) => i.imageId);
 
   await prisma.whatsAppSession.update({
@@ -816,11 +867,7 @@ async function askForBatchTheme(session: SessionRow, images: PendingImage[], fro
   const count = images.length;
   await sendWhatsAppTextMessage({
     to: from,
-    body:
-      `Got ${count} image${count === 1 ? "" : "s"}! 📸\n\n` +
-      `What theme or background would you like?\n\n` +
-      `Examples:\n• _clean white studio_\n• _marble kitchen counter_\n• _outdoor sunset scene_\n• _minimal black background_\n\n` +
-      `Send your theme as a text message.`,
+    body: t(lang, "ask_theme", { count, plural: plural(count, lang) }),
   });
 }
 
@@ -831,6 +878,7 @@ async function askForBatchTheme(session: SessionRow, images: PendingImage[], fro
  */
 async function processBatch(session: SessionRow, imageIds: string[], theme: string, from: string): Promise<void> {
   if (imageIds.length === 0) return;
+  const lang = resolveLang(session.language);
 
   const total = imageIds.length;
   let canEnhance = total;
@@ -842,7 +890,7 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
       if (canEnhance === 0) {
         await sendWhatsAppTextMessage({
           to: from,
-          body: `⚠️ You've used all your AI credits. They reset every Monday.\n\nVisit ${SIGNUP_URL} to purchase more credits.`,
+          body: t(lang, "credits_exhausted_weekly", { signup: SIGNUP_URL }),
         });
         return;
       }
@@ -859,7 +907,7 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
       });
       await sendWhatsAppTextMessage({
         to: from,
-        body: `Your 5 free enhancements are used up! 🎉\n\nSign up: ${SIGNUP_URL}\n\nAlready have an account? Type /start.`,
+        body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
       });
       return;
     }
@@ -869,8 +917,8 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
   await sendWhatsAppTextMessage({
     to: from,
     body: skipped > 0
-      ? `🎨 Enhancing ${canEnhance} of ${total} images (${skipped} skipped — not enough credits). This may take a moment...`
-      : `🎨 Enhancing ${canEnhance} image${canEnhance === 1 ? "" : "s"}... This may take a moment.`,
+      ? t(lang, "enhancing_count_partial", { enhanceCount: canEnhance, total, skipped })
+      : t(lang, "enhancing_count", { count: canEnhance, plural: plural(canEnhance, lang) }),
   });
 
   const toProcess = imageIds.slice(0, canEnhance);
@@ -921,7 +969,7 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     if (!r.ok) continue;
-    const caption = toProcess.length > 1 ? `Image ${i + 1} of ${toProcess.length}` : undefined;
+    const caption = toProcess.length > 1 ? t(lang, "caption_image_of", { i: i + 1, total: toProcess.length }) : undefined;
     try {
       const wamid = await sendEnhancedImage(from, r.enhanced.base64, r.enhanced.mimeType, caption);
       successCount++;
@@ -958,15 +1006,18 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
   // Summary
   const failureCount = results.length - successCount;
   const summaryParts: string[] = [];
-  if (successCount > 0) summaryParts.push(`✅ ${successCount} enhanced`);
-  if (failureCount > 0) summaryParts.push(`⚠️ ${failureCount} failed`);
-  if (skipped > 0) summaryParts.push(`⏭️ ${skipped} skipped (no credits)`);
+  if (successCount > 0) summaryParts.push(t(lang, "summary_enhanced", { n: successCount }));
+  if (failureCount > 0) summaryParts.push(t(lang, "summary_failed", { n: failureCount }));
+  if (skipped > 0) summaryParts.push(t(lang, "summary_skipped", { n: skipped }));
 
-  let footer = "\n\n💡 *Reply* to any image above to refine just that one, or type /new to start over.";
+  let footer = "";
   if (session.isVerified && session.userId) {
     try {
       const balance = await getAICredits(prisma, session.userId);
-      footer = `\n\n💳 Credits left: ${balance.weeklyCredits} weekly${balance.purchasedCredits > 0 ? ` + ${balance.purchasedCredits} purchased` : ""}.${footer}`;
+      const purchasedSuffix = balance.purchasedCredits > 0
+        ? t(lang, "credits_info_purchased_suffix", { purchased: balance.purchasedCredits })
+        : "";
+      footer = t(lang, "summary_footer_verified", { weekly: balance.weeklyCredits, purchased: purchasedSuffix });
     } catch { /* non-critical */ }
   } else {
     const fresh = await prisma.whatsAppSession.findUnique({
@@ -975,7 +1026,7 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
     });
     if (fresh) {
       const rem = Math.max(0, fresh.creditsLimit - fresh.creditsUsed);
-      footer = `\n\n💳 Free enhancements left: ${rem}.${footer}`;
+      footer = t(lang, "summary_footer_guest", { remaining: rem });
       if (rem === 0) {
         await prisma.whatsAppSession.update({ where: { id: session.id }, data: { state: STATES.EXHAUSTED } });
       }
@@ -984,7 +1035,7 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
 
   await sendWhatsAppTextMessage({
     to: from,
-    body: `${summaryParts.join(" · ") || "Done"}${footer}`,
+    body: `${summaryParts.join(" · ") || t(lang, "summary_done_fallback")}${footer}`,
   });
 }
 
@@ -1002,6 +1053,8 @@ async function handleRefinement(
   from: string,
   replyToWamid?: string,
 ): Promise<void> {
+  const lang = resolveLang(session.language);
+
   // Resolve source image: prefer the specific image the user replied to,
   // otherwise fall back to the most recent enhancement in this session.
   let sourceImage = session.lastSourceImage;
@@ -1015,15 +1068,10 @@ async function handleRefinement(
       sourceImage = quoted.sourceImage;
       sourceMimeType = quoted.sourceMimeType;
     }
-    // If the reply is to something that isn't one of our enhancements,
-    // silently fall back to lastSource below.
   }
 
   if (!sourceImage || !sourceMimeType) {
-    await sendWhatsAppTextMessage({
-      to: from,
-      body: "I don't have the previous image anymore. Send a new product photo to start fresh.",
-    });
+    await sendWhatsAppTextMessage({ to: from, body: t(lang, "refine_no_source") });
     return;
   }
 
@@ -1035,7 +1083,7 @@ async function handleRefinement(
       if (err instanceof AICreditError) {
         await sendWhatsAppTextMessage({
           to: from,
-          body: `⚠️ You've used all your AI credits for this week. They reset every Monday.\n\nVisit ${SIGNUP_URL} to purchase more credits.`,
+          body: t(lang, "credits_exhausted_weekly", { signup: SIGNUP_URL }),
         });
         return;
       }
@@ -1050,7 +1098,7 @@ async function handleRefinement(
       });
       await sendWhatsAppTextMessage({
         to: from,
-        body: `Your 5 free enhancements are used up! 🎉\n\nSign up for 50 weekly credits:\n${SIGNUP_URL}`,
+        body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
       });
       return;
     }
@@ -1060,13 +1108,12 @@ async function handleRefinement(
     });
   }
 
-  await sendWhatsAppTextMessage({ to: from, body: "🎨 Applying your refinement... one moment." });
+  await sendWhatsAppTextMessage({ to: from, body: t(lang, "refine_applying") });
 
   try {
     const refined = await refineProductImage(sourceImage, sourceMimeType, instruction);
     const outWamid = await sendEnhancedImage(from, refined.base64, refined.mimeType);
 
-    // Track the refined image so the user can reply-to-refine again
     if (outWamid) {
       await prisma.whatsAppEnhancement.create({
         data: {
@@ -1078,7 +1125,6 @@ async function handleRefinement(
       });
     }
 
-    // Update lastSource to the refined image so a non-reply follow-up still refines the latest
     await prisma.whatsAppSession.update({
       where: { id: session.id },
       data: {
@@ -1089,11 +1135,14 @@ async function handleRefinement(
     });
 
     // Balance summary
-    let summary = "✅ Refinement applied.";
+    let summary = t(lang, "refine_applied_fallback");
     if (session.isVerified && session.userId) {
       try {
         const credits = await getAICredits(prisma, session.userId);
-        summary = `✅ Refinement applied. Credits remaining: ${credits.weeklyCredits} weekly${credits.purchasedCredits > 0 ? ` + ${credits.purchasedCredits} purchased` : ""}.`;
+        const purchasedSuffix = credits.purchasedCredits > 0
+          ? t(lang, "credits_info_purchased_suffix", { purchased: credits.purchasedCredits })
+          : "";
+        summary = t(lang, "refine_applied_verified", { weekly: credits.weeklyCredits, purchased: purchasedSuffix });
       } catch {
         // non-critical
       }
@@ -1104,26 +1153,20 @@ async function handleRefinement(
       });
       if (fresh) {
         const remaining = Math.max(0, fresh.creditsLimit - fresh.creditsUsed);
-        summary = `✅ Refinement applied. *${remaining}* free enhancement${remaining === 1 ? "" : "s"} remaining.`;
+        summary = t(lang, "refine_applied_guest", { remaining, plural: plural(remaining, lang) });
       }
     }
     await sendWhatsAppTextMessage({ to: from, body: summary });
-    await sendRefinementButtons(from);
+    await sendRefinementButtons(from, lang);
   } catch (err) {
     console.error("WhatsApp refinement error:", err);
-    // Only refund guest credits (simple counter). Verified user refunds are skipped
-    // because consumeWeeklyAICredit may have drained weekly or purchased — refunding
-    // the wrong bucket is worse than eating one credit on failure.
     if (!session.isVerified) {
       await prisma.whatsAppSession.update({
         where: { id: session.id },
         data: { creditsUsed: { decrement: 1 } },
       });
     }
-    await sendWhatsAppTextMessage({
-      to: from,
-      body: "Sorry, I couldn't apply that refinement. Try rephrasing it, or send a new image.",
-    });
+    await sendWhatsAppTextMessage({ to: from, body: t(lang, "refine_failed") });
   }
 }
 

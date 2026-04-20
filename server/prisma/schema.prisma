@@ -286,6 +286,7 @@ model WhatsAppSession {
   otpAttempts        Int       @default(0)
   pendingTheme       String?
   pendingImageIds    String[]  @default([])
+  language           String    @default("en")
   lastSourceImage    String?   @db.Text
   lastSourceMimeType String?
   lastMessageAt      DateTime  @default(now())
