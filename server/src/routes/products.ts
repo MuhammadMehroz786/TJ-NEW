@@ -186,6 +186,133 @@ router.delete("/:id", async (req: AuthRequest, res: Response): Promise<void> => 
   }
 });
 
+// POST /api/products/bulk-import — create many products in one call. Accepts
+// an array of rows already parsed on the client (CSV → JSON). Each row is
+// validated independently; valid rows are created in a single transaction and
+// invalid rows are returned with a per-row error so the merchant can fix them.
+//
+// Body: { rows: Array<{ title, price, quantity?, sku?, currency?, status?,
+//   description?, compareAtPrice?, category?, vendor?, tags?, imageUrl? }> }
+interface BulkImportRow {
+  title?: unknown;
+  price?: unknown;
+  quantity?: unknown;
+  sku?: unknown;
+  currency?: unknown;
+  status?: unknown;
+  description?: unknown;
+  compareAtPrice?: unknown;
+  category?: unknown;
+  productType?: unknown;
+  vendor?: unknown;
+  tags?: unknown;
+  imageUrl?: unknown;
+}
+
+const MAX_IMPORT_ROWS = 500;
+
+router.post("/bulk-import", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? (req.body.rows as BulkImportRow[]) : null;
+    if (!rows || rows.length === 0) {
+      res.status(400).json({ error: "rows array is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (rows.length > MAX_IMPORT_ROWS) {
+      res.status(400).json({
+        error: `Too many rows. Max ${MAX_IMPORT_ROWS} per import — split your file and try again.`,
+        code: "TOO_MANY_ROWS",
+      });
+      return;
+    }
+
+    const statusValues = new Set(["DRAFT", "ACTIVE", "ARCHIVED"]);
+    const toDataOrError = (row: BulkImportRow, index: number): { ok: true; data: Prisma.ProductCreateManyInput } | { ok: false; error: string; index: number } => {
+      const title = typeof row.title === "string" ? row.title.trim() : "";
+      if (!title) return { ok: false, error: "Missing title", index };
+      if (title.length > 255) return { ok: false, error: "Title too long (max 255 chars)", index };
+
+      const priceNum = typeof row.price === "number" ? row.price : parseFloat(String(row.price ?? ""));
+      if (!Number.isFinite(priceNum) || priceNum < 0) return { ok: false, error: "Price must be a non-negative number", index };
+
+      const qtyRaw = row.quantity;
+      const qtyNum = qtyRaw === undefined || qtyRaw === null || qtyRaw === "" ? 0 : parseInt(String(qtyRaw));
+      if (!Number.isFinite(qtyNum) || qtyNum < 0) return { ok: false, error: "Quantity must be a non-negative integer", index };
+
+      const statusRaw = typeof row.status === "string" ? row.status.trim().toUpperCase() : "DRAFT";
+      const status = statusValues.has(statusRaw) ? statusRaw : "DRAFT";
+
+      const currency = (typeof row.currency === "string" && row.currency.trim()) || "SAR";
+
+      const compareAtPriceRaw = row.compareAtPrice;
+      let compareAtPrice: number | null = null;
+      if (compareAtPriceRaw !== undefined && compareAtPriceRaw !== null && compareAtPriceRaw !== "") {
+        const n = typeof compareAtPriceRaw === "number" ? compareAtPriceRaw : parseFloat(String(compareAtPriceRaw));
+        if (!Number.isFinite(n) || n < 0) return { ok: false, error: "compareAtPrice must be a non-negative number", index };
+        compareAtPrice = n;
+      }
+
+      const tagsRaw = row.tags;
+      let tags: string[] = [];
+      if (Array.isArray(tagsRaw)) {
+        tags = tagsRaw.filter((t) => typeof t === "string").map((t) => (t as string).trim().toLowerCase()).filter(Boolean);
+      } else if (typeof tagsRaw === "string" && tagsRaw.trim()) {
+        tags = tagsRaw.split(/[,;|]/).map((t) => t.trim().toLowerCase()).filter(Boolean);
+      }
+
+      const imageUrlRaw = typeof row.imageUrl === "string" ? row.imageUrl.trim() : "";
+      const images = imageUrlRaw && /^https?:\/\//i.test(imageUrlRaw) ? [imageUrlRaw] : [];
+
+      return {
+        ok: true,
+        data: {
+          userId: req.auth!.userId!,
+          title,
+          price: new Prisma.Decimal(priceNum.toFixed(2)),
+          currency: currency.toUpperCase().slice(0, 8),
+          quantity: qtyNum,
+          status: status as "DRAFT" | "ACTIVE" | "ARCHIVED",
+          description: typeof row.description === "string" ? row.description : null,
+          compareAtPrice: compareAtPrice !== null ? new Prisma.Decimal(compareAtPrice.toFixed(2)) : null,
+          sku: typeof row.sku === "string" && row.sku.trim() ? row.sku.trim() : null,
+          category: typeof row.category === "string" && row.category.trim() ? row.category.trim() : null,
+          productType: typeof row.productType === "string" && row.productType.trim() ? row.productType.trim() : null,
+          vendor: typeof row.vendor === "string" && row.vendor.trim() ? row.vendor.trim() : null,
+          tags: tags as unknown as Prisma.InputJsonValue,
+          images: images as unknown as Prisma.InputJsonValue,
+        },
+      };
+    };
+
+    const valid: Prisma.ProductCreateManyInput[] = [];
+    const errors: { row: number; error: string }[] = [];
+    rows.forEach((row, i) => {
+      const result = toDataOrError(row, i);
+      if (result.ok) valid.push(result.data);
+      else errors.push({ row: i + 1, error: result.error });
+    });
+
+    let created = 0;
+    if (valid.length > 0) {
+      // skipDuplicates: a second row with the same [sku, userId] unique combo
+      // is silently dropped rather than failing the whole batch.
+      const result = await prisma.product.createMany({ data: valid, skipDuplicates: true });
+      created = result.count;
+    }
+
+    res.json({
+      created,
+      skipped: valid.length - created,
+      errors,
+      total: rows.length,
+      message: `Imported ${created} product(s)${errors.length ? `, ${errors.length} row(s) had errors` : ""}`,
+    });
+  } catch (err) {
+    console.error("Bulk import error:", err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  }
+});
+
 // POST /api/products/:id/enhance — enhance the product's first image and
 // prepend the result to product.images. One credit per call. Also saves the
 // enhanced image to the user's AI Studio library (folder: "Enhanced Products")

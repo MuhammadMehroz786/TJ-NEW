@@ -18,6 +18,8 @@ import {
   Megaphone,
   Sparkles,
   Loader2,
+  FileUp,
+  Download,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -89,6 +91,70 @@ const backgroundOptions = [
   { value: "nature", label: "Nature" },
   { value: "gradient", label: "Gradient" },
 ];
+
+// Minimal RFC4180-ish CSV parser — handles quoted fields, escaped quotes, and
+// commas-inside-quotes. Good enough for merchant spreadsheets exported from
+// Excel/Google Sheets. Returns an array of rows (each row is an array of cells).
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        cell += ch;
+      }
+    } else {
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === ",") { row.push(cell); cell = ""; }
+      else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+      else if (ch === "\r") { /* ignore */ }
+      else { cell += ch; }
+    }
+  }
+  if (cell.length > 0 || row.length > 0) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+}
+
+// Accepted header names (case-insensitive), aliased to canonical keys
+const CSV_HEADER_ALIASES: Record<string, string> = {
+  title: "title", name: "title", product: "title", "product name": "title",
+  price: "price", cost: "price",
+  quantity: "quantity", qty: "quantity", stock: "quantity", inventory: "quantity",
+  sku: "sku",
+  currency: "currency",
+  status: "status",
+  description: "description", desc: "description",
+  compareatprice: "compareAtPrice", "compare at price": "compareAtPrice", "compare price": "compareAtPrice", msrp: "compareAtPrice",
+  category: "category",
+  producttype: "productType", "product type": "productType", type: "productType",
+  vendor: "vendor", brand: "vendor",
+  tags: "tags",
+  imageurl: "imageUrl", image: "imageUrl", "image url": "imageUrl", photo: "imageUrl",
+};
+
+function rowsToImportJSON(rows: string[][]): Record<string, string>[] {
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => {
+    const key = h.trim().toLowerCase();
+    return CSV_HEADER_ALIASES[key] || "";
+  });
+  return rows.slice(1).map((r) => {
+    const obj: Record<string, string> = {};
+    headers.forEach((key, i) => {
+      if (key && r[i] !== undefined) obj[key] = r[i].trim();
+    });
+    return obj;
+  });
+}
+
+const CSV_TEMPLATE = "title,price,quantity,sku,status,description,imageUrl,category,vendor,tags\n" +
+  "Example Product,99.00,10,SKU-001,DRAFT,\"Soft cotton t-shirt, unisex\",https://example.com/img.jpg,Apparel,Acme,\"summer,cotton\"\n";
 
 const statusColors: Record<string, string> = {
   ACTIVE: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -442,6 +508,14 @@ export function Products() {
   const [studioSelected, setStudioSelected] = useState<Set<string>>(new Set());
   const [, setStudioSearch] = useState("");
 
+  // CSV bulk import state
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<Record<string, string>[]>([]);
+  const [importFileName, setImportFileName] = useState("");
+  const [importError, setImportError] = useState("");
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
+
   // Enhance existing product (from marketplace sync or manual) state
   const [enhanceProduct, setEnhanceProduct] = useState<Product | null>(null);
   const [enhanceProductScene, setEnhanceProductScene] = useState("studio");
@@ -726,6 +800,82 @@ export function Products() {
     }
   };
 
+  const openImport = () => {
+    setImportOpen(true);
+    setImportRows([]);
+    setImportFileName("");
+    setImportError("");
+  };
+
+  const handleImportFile = async (file: File) => {
+    setImportError("");
+    setImportFileName(file.name);
+    if (file.size > 5 * 1024 * 1024) {
+      setImportError("File is too large (max 5 MB)");
+      setImportRows([]);
+      return;
+    }
+    try {
+      const text = await file.text();
+      const raw = parseCSV(text);
+      const parsed = rowsToImportJSON(raw);
+      if (parsed.length === 0) {
+        setImportError("No data rows found. Make sure the first row is the header (title, price, ...).");
+        setImportRows([]);
+        return;
+      }
+      if (parsed.length > 500) {
+        setImportError(`Too many rows (${parsed.length}). Max 500 per import — split the file.`);
+        setImportRows([]);
+        return;
+      }
+      if (!parsed.some((r) => r.title)) {
+        setImportError("Couldn't find a 'title' column. Rename your column to 'title' or 'name'.");
+        setImportRows([]);
+        return;
+      }
+      setImportRows(parsed);
+    } catch {
+      setImportError("Couldn't read the file. Make sure it's a valid CSV.");
+      setImportRows([]);
+    }
+  };
+
+  const runImport = async () => {
+    if (importRows.length === 0) return;
+    setImporting(true);
+    try {
+      const res = await api.post("/products/bulk-import", { rows: importRows });
+      const { created, errors, total } = res.data as { created: number; errors: { row: number; error: string }[]; total: number };
+      if (errors.length > 0) {
+        toast.success(`Imported ${created} of ${total} — ${errors.length} row(s) had errors.`);
+      } else {
+        toast.success(`Imported ${created} product(s)`);
+      }
+      setImportOpen(false);
+      setImportRows([]);
+      setImportFileName("");
+      fetchProducts();
+    } catch (err: unknown) {
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        "Failed to import products";
+      toast.error(message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const blob = new Blob([CSV_TEMPLATE], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tijarflow-products-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const openEnhanceProduct = (product: Product) => {
     setEnhanceProduct(product);
     setEnhanceProductScene("studio");
@@ -783,10 +933,16 @@ export function Products() {
             </p>
           )}
         </div>
-        <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700 text-white">
-          <Plus className="h-4 w-4 mr-2" />
-          {t("products.addProduct")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={openImport}>
+            <FileUp className="h-4 w-4 mr-2" />
+            Import CSV
+          </Button>
+          <Button onClick={openCreate} className="bg-teal-600 hover:bg-teal-700 text-white">
+            <Plus className="h-4 w-4 mr-2" />
+            {t("products.addProduct")}
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -1546,6 +1702,110 @@ export function Products() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* CSV Import Dialog */}
+      <Dialog open={importOpen} onOpenChange={(open) => { if (!open && !importing) setImportOpen(false); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileUp className="h-5 w-5 text-teal-600" />
+              Import Products from CSV
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-slate-600">
+              Upload a CSV with your products. Required column: <code className="px-1 bg-slate-100 rounded">title</code> and <code className="px-1 bg-slate-100 rounded">price</code>.
+              Optional: quantity, sku, status, description, imageUrl, category, vendor, tags.
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={downloadTemplate}>
+                <Download className="h-4 w-4 mr-2" />
+                Download template
+              </Button>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleImportFile(f);
+                  e.target.value = "";
+                }}
+              />
+              <Button variant="outline" size="sm" onClick={() => importFileRef.current?.click()}>
+                <Upload className="h-4 w-4 mr-2" />
+                Choose file
+              </Button>
+              {importFileName && (
+                <span className="text-xs text-slate-500 truncate max-w-[200px]">{importFileName}</span>
+              )}
+            </div>
+
+            {importError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-md text-sm">
+                {importError}
+              </div>
+            )}
+
+            {importRows.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-slate-700">
+                    Preview — {importRows.length} row{importRows.length === 1 ? "" : "s"}
+                  </p>
+                  <p className="text-xs text-slate-400">Showing first 5</p>
+                </div>
+                <div className="border border-slate-200 rounded-md overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium text-slate-600">Title</th>
+                        <th className="text-left px-3 py-2 font-medium text-slate-600">Price</th>
+                        <th className="text-left px-3 py-2 font-medium text-slate-600">Qty</th>
+                        <th className="text-left px-3 py-2 font-medium text-slate-600">SKU</th>
+                        <th className="text-left px-3 py-2 font-medium text-slate-600">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importRows.slice(0, 5).map((row, i) => (
+                        <tr key={i} className="border-t border-slate-100">
+                          <td className="px-3 py-2 truncate max-w-[200px]">{row.title || <span className="text-red-500">missing</span>}</td>
+                          <td className="px-3 py-2">{row.price || <span className="text-red-500">missing</span>}</td>
+                          <td className="px-3 py-2">{row.quantity || "0"}</td>
+                          <td className="px-3 py-2 text-slate-500">{row.sku || "—"}</td>
+                          <td className="px-3 py-2 text-slate-500">{(row.status || "DRAFT").toUpperCase()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importing}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-teal-600 hover:bg-teal-700 text-white"
+                onClick={runImport}
+                disabled={importing || importRows.length === 0}
+              >
+                {importing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  `Import ${importRows.length || ""} product${importRows.length === 1 ? "" : "s"}`
+                )}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
