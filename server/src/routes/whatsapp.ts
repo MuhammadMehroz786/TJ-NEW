@@ -23,6 +23,7 @@ import {
 import { refineProductImage, sanitizeInstruction } from "../services/imageRefinement";
 import { addImageToBatch, type PendingImage } from "../services/whatsappBatch";
 import { t, plural, resolveLang, type Lang } from "../services/whatsappI18n";
+import { saveEnhancementToLibrary } from "../lib/imageStorage";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -986,6 +987,23 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
           },
         });
       }
+
+      // Auto-save to the merchant's AI Studio library so they can access
+      // WhatsApp-enhanced images from the web. Guests have no userId so skip.
+      // Best-effort: library-save failure must not block the WhatsApp reply.
+      if (session.isVerified && session.userId) {
+        try {
+          await saveEnhancementToLibrary(prisma, {
+            userId: session.userId,
+            base64: r.enhanced.base64,
+            mimeType: r.enhanced.mimeType,
+            background: "whatsapp",
+            folderName: "WhatsApp",
+          });
+        } catch (libErr) {
+          console.error("[WhatsApp] save to AI Studio library failed:", (libErr as Error)?.message || libErr);
+        }
+      }
     } catch (err) {
       console.error("[WhatsApp] send enhanced image failed:", (err as Error)?.message || err);
     }
@@ -1123,6 +1141,21 @@ async function handleRefinement(
           sourceMimeType: refined.mimeType,
         },
       });
+    }
+
+    // Auto-save refined image to the merchant's AI Studio library
+    if (session.isVerified && session.userId) {
+      try {
+        await saveEnhancementToLibrary(prisma, {
+          userId: session.userId,
+          base64: refined.base64,
+          mimeType: refined.mimeType,
+          background: "whatsapp-refine",
+          folderName: "WhatsApp",
+        });
+      } catch (libErr) {
+        console.error("[WhatsApp] save refine to library failed:", (libErr as Error)?.message || libErr);
+      }
     }
 
     await prisma.whatsAppSession.update({
