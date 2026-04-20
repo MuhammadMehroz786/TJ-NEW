@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { ArrowLeft, Mail } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export function Signup() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -20,6 +21,7 @@ export function Signup() {
   const [resending, setResending] = useState(false);
   const { signupStart, signupVerify, signupResend } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const handleRoleSelect = (selectedRole: "MERCHANT" | "CREATOR") => {
     setRole(selectedRole);
@@ -91,14 +93,14 @@ export function Signup() {
       <Card className="border-slate-200/60 shadow-xl shadow-slate-200/50">
         <CardHeader className="text-center pb-2">
           <CardTitle className="text-2xl font-semibold text-slate-900">
-            {step === 1 ? "I want to..." : step === 2 ? "Create your account" : "Verify your email"}
+            {step === 1 ? t("signup.roleTitle") : step === 2 ? t("signup.formTitle") : t("signup.otpTitle")}
           </CardTitle>
           <CardDescription className="text-slate-500">
             {step === 1
-              ? "Choose how you'll use TijarFlow"
+              ? t("signup.roleSubtitle")
               : step === 2
-                ? `Step 2 of 3 — ${role === "MERCHANT" ? "Merchant" : "Creator"} account`
-                : `Step 3 of 3 — We sent a code to ${email}`}
+                ? t("signup.formStep", { role: role === "MERCHANT" ? t("signup.merchant") : t("signup.creator") })
+                : t("signup.otpStep", { email })}
           </CardDescription>
           <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
@@ -113,27 +115,27 @@ export function Signup() {
               <button
                 type="button"
                 onClick={() => handleRoleSelect("MERCHANT")}
-                className="w-full border-2 border-slate-200 rounded-xl p-5 flex items-center gap-4 hover:border-teal-500 hover:bg-teal-50/50 transition-all text-left"
+                className="w-full border-2 border-slate-200 rounded-xl p-5 flex items-center gap-4 hover:border-teal-500 hover:bg-teal-50/50 transition-all text-start"
               >
                 <div className="w-12 h-12 bg-teal-50 rounded-xl flex items-center justify-center text-2xl shrink-0">
                   🏪
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-900">Sell & Advertise</p>
-                  <p className="text-sm text-slate-500 mt-0.5">I'm a store owner or merchant</p>
+                  <p className="font-semibold text-slate-900">{t("signup.roleMerchantTitle")}</p>
+                  <p className="text-sm text-slate-500 mt-0.5">{t("signup.roleMerchantSubtitle")}</p>
                 </div>
               </button>
               <button
                 type="button"
                 onClick={() => handleRoleSelect("CREATOR")}
-                className="w-full border-2 border-slate-200 rounded-xl p-5 flex items-center gap-4 hover:border-teal-500 hover:bg-teal-50/50 transition-all text-left"
+                className="w-full border-2 border-slate-200 rounded-xl p-5 flex items-center gap-4 hover:border-teal-500 hover:bg-teal-50/50 transition-all text-start"
               >
                 <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center text-2xl shrink-0">
                   🎬
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-900">Promote & Earn</p>
-                  <p className="text-sm text-slate-500 mt-0.5">I'm a content creator</p>
+                  <p className="font-semibold text-slate-900">{t("signup.roleCreatorTitle")}</p>
+                  <p className="text-sm text-slate-500 mt-0.5">{t("signup.roleCreatorSubtitle")}</p>
                 </div>
               </button>
             </div>
@@ -145,29 +147,29 @@ export function Signup() {
                 className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-4 -mt-1"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Back
+                {t("common.back")}
               </button>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Full Name</Label>
-                  <Input id="name" type="text" placeholder="Your full name" value={name} onChange={(e) => setName(e.target.value)} required />
+                  <Label htmlFor="name">{t("signup.nameLabel")}</Label>
+                  <Input id="name" type="text" placeholder={t("signup.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                  <Label htmlFor="email">{t("signup.emailLabel")}</Label>
+                  <Input id="email" type="email" placeholder={t("signup.emailPlaceholder")} value={email} onChange={(e) => setEmail(e.target.value)} required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
-                  <Input id="password" type="password" placeholder="At least 8 characters" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
+                  <Label htmlFor="password">{t("signup.passwordLabel")}</Label>
+                  <Input id="password" type="password" placeholder={t("signup.passwordPlaceholder")} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
                 </div>
                 <Button type="submit" className="w-full bg-teal-600 hover:bg-teal-700 text-white" disabled={loading}>
                   {loading ? (
                     <span className="flex items-center gap-2">
                       <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Sending code...
+                      {t("signup.submitting")}
                     </span>
                   ) : (
-                    "Send verification code"
+                    t("signup.submit")
                   )}
                 </Button>
               </form>
@@ -180,15 +182,15 @@ export function Signup() {
                 className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-4 -mt-1"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Back
+                {t("common.back")}
               </button>
               <form onSubmit={handleVerify} className="space-y-4">
                 <div className="flex items-center gap-3 p-3 rounded-lg bg-teal-50/60 border border-teal-100 text-sm text-teal-800">
                   <Mail className="h-4 w-4 shrink-0" />
-                  <span>Check your inbox for a 6-digit code. It expires in 10 minutes.</span>
+                  <span>{t("signup.otpHint")}</span>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="code">Verification code</Label>
+                  <Label htmlFor="code">{t("signup.otpLabel")}</Label>
                   <Input
                     id="code"
                     inputMode="numeric"
@@ -205,10 +207,10 @@ export function Signup() {
                   {loading ? (
                     <span className="flex items-center gap-2">
                       <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Verifying...
+                      {t("signup.otpSubmitting")}
                     </span>
                   ) : (
-                    "Verify & create account"
+                    t("signup.otpSubmit")
                   )}
                 </Button>
                 <button
@@ -217,14 +219,14 @@ export function Signup() {
                   disabled={resending}
                   className="w-full text-sm text-slate-500 hover:text-slate-700 disabled:opacity-60"
                 >
-                  {resending ? "Resending..." : "Didn't get it? Resend code"}
+                  {resending ? t("signup.otpResending") : t("signup.otpResend")}
                 </button>
               </form>
             </>
           )}
           <p className="mt-6 text-center text-sm text-slate-500">
-            Already have an account?{" "}
-            <Link to="/login" className="text-teal-600 font-medium hover:text-teal-700">Sign in</Link>
+            {t("signup.haveAccount")}{" "}
+            <Link to="/login" className="text-teal-600 font-medium hover:text-teal-700">{t("signup.signIn")}</Link>
           </p>
         </CardContent>
       </Card>

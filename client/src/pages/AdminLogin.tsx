@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { ArrowLeft, Mail, ShieldCheck } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export function AdminLogin() {
   const [step, setStep] = useState<1 | 2>(1);
@@ -17,6 +18,7 @@ export function AdminLogin() {
   const [resending, setResending] = useState(false);
   const { adminRequestCode, adminVerifyCode } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const handleRequest = async (e: FormEvent) => {
     e.preventDefault();
@@ -82,12 +84,10 @@ export function AdminLogin() {
             <ShieldCheck className="h-6 w-6 text-purple-700" />
           </div>
           <CardTitle className="text-2xl font-semibold text-slate-900">
-            {step === 1 ? "Admin sign-in" : "Enter your code"}
+            {step === 1 ? t("adminLogin.title") : t("adminLogin.codeTitle")}
           </CardTitle>
           <CardDescription className="text-slate-500">
-            {step === 1
-              ? "Admins sign in with an email code — no password"
-              : `If ${email} is an admin, a code is on its way.`}
+            {step === 1 ? t("adminLogin.subtitle") : t("adminLogin.codeSubtitle", { email })}
           </CardDescription>
           <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
@@ -100,7 +100,7 @@ export function AdminLogin() {
           {step === 1 ? (
             <form onSubmit={handleRequest} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Admin email</Label>
+                <Label htmlFor="email">{t("adminLogin.emailLabel")}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -119,10 +119,10 @@ export function AdminLogin() {
                 {loading ? (
                   <span className="flex items-center gap-2">
                     <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Sending code...
+                    {t("adminLogin.sending")}
                   </span>
                 ) : (
-                  "Send sign-in code"
+                  t("adminLogin.send")
                 )}
               </Button>
             </form>
@@ -134,18 +134,15 @@ export function AdminLogin() {
                 className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-4 -mt-1"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Back
+                {t("common.back")}
               </button>
               <form onSubmit={handleVerify} className="space-y-4">
                 <div className="flex items-start gap-3 p-3 rounded-lg bg-purple-50/60 border border-purple-100 text-sm text-purple-800">
                   <Mail className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>
-                    A code has been sent only if this email belongs to an admin account. It arrives in about 30 seconds and expires in 10 minutes.
-                    If nothing arrives, double-check the email address and go back.
-                  </span>
+                  <span>{t("adminLogin.codeHint")}</span>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="code">6-digit code</Label>
+                  <Label htmlFor="code">{t("adminLogin.codeLabel")}</Label>
                   <Input
                     id="code"
                     inputMode="numeric"
@@ -167,10 +164,10 @@ export function AdminLogin() {
                   {loading ? (
                     <span className="flex items-center gap-2">
                       <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Verifying...
+                      {t("adminLogin.verifying")}
                     </span>
                   ) : (
-                    "Verify & sign in"
+                    t("adminLogin.verify")
                   )}
                 </Button>
                 <button
@@ -179,15 +176,15 @@ export function AdminLogin() {
                   disabled={resending}
                   className="w-full text-sm text-slate-500 hover:text-slate-700 disabled:opacity-60"
                 >
-                  {resending ? "Resending..." : "Didn't get it? Resend code"}
+                  {resending ? t("adminLogin.resending") : t("adminLogin.resend")}
                 </button>
               </form>
             </>
           )}
           <p className="mt-6 text-center text-sm text-slate-500">
-            Not an admin?{" "}
+            {t("adminLogin.notAdmin")}{" "}
             <Link to="/login" className="text-teal-600 font-medium hover:text-teal-700">
-              Sign in with password
+              {t("adminLogin.passwordLogin")}
             </Link>
           </p>
         </CardContent>

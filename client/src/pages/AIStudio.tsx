@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import api from "@/lib/api";
+import { useTranslation } from "react-i18next";
 import { startEnhanceJob, startRefineJob, startPackJob, subscribeToResults } from "@/lib/aiStudioJobs";
 import { AiStudioJobsPill } from "@/components/AiStudioJobsPill";
 
@@ -38,6 +39,7 @@ const backgroundOptions = [
 ];
 
 export function AIStudio() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [images, setImages] = useState<AiStudioImage[]>([]);
   const [folders, setFolders] = useState<AiStudioFolder[]>([]);
@@ -308,8 +310,8 @@ export function AIStudio() {
       <AiStudioJobsPill />
       <div className="mb-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">AI Studio</h1>
-          <p className="text-slate-500 text-sm mt-1">{images.length} items in All Images</p>
+          <h1 className="text-2xl font-semibold text-slate-900">{t("aiStudio.title")}</h1>
+          <p className="text-slate-500 text-sm mt-1">{t("aiStudio.itemsCount", { count: images.length })}</p>
         </div>
         {/* Credits pill */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -332,7 +334,7 @@ export function AIStudio() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-teal-300 bg-white text-teal-700 text-sm font-medium hover:bg-teal-50 transition-colors"
           >
             <Wallet className="h-3.5 w-3.5" />
-            Buy Credits
+            {t("aiStudio.buyCredits")}
           </button>
         </div>
       </div>
@@ -348,13 +350,13 @@ export function AIStudio() {
         <CardContent className="p-5">
           <div className="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-5">
             <div className="space-y-3">
-              <h2 className="text-sm font-semibold text-slate-900">Folders</h2>
+              <h2 className="text-sm font-semibold text-slate-900">{t("aiStudio.folders")}</h2>
               <div className="flex gap-2">
-                <Input value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder="New folder" />
+                <Input value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder={t("aiStudio.newFolder")} />
                 <Button onClick={handleCreateFolder} variant="outline" size="icon"><FolderPlus className="h-4 w-4" /></Button>
               </div>
               <div className="space-y-1 max-h-[520px] overflow-y-auto pr-1">
-                <button className={`w-full text-left px-2.5 py-2 rounded-md border text-sm ${selectedFolderId === "all" ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 hover:bg-slate-50"}`} onClick={() => setSelectedFolderId("all")}>All Images ({images.length})</button>
+                <button className={`w-full text-left px-2.5 py-2 rounded-md border text-sm ${selectedFolderId === "all" ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 hover:bg-slate-50"}`} onClick={() => setSelectedFolderId("all")}>{t("aiStudio.allImages")} ({images.length})</button>
                 {folders.map((folder) => (
                   <div key={folder.id} className="flex items-center gap-1">
                     <button className={`flex-1 text-left px-2.5 py-2 rounded-md border text-sm ${selectedFolderId === folder.id ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 hover:bg-slate-50"}`} onClick={() => setSelectedFolderId(folder.id)}>{folder.name} ({folder._count?.images || 0})</button>
@@ -370,8 +372,8 @@ export function AIStudio() {
                 <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handleFileSelect(e.target.files)} />
                 <div className="flex flex-col items-center gap-2">
                   <ImagePlus className="h-8 w-8 text-slate-400" />
-                  <p className="text-sm font-medium text-slate-700">Upload product image(s)</p>
-                  <p className="text-xs text-slate-400">Drag & drop multiple images or click to browse</p>
+                  <p className="text-sm font-medium text-slate-700">{t("aiStudio.uploadHint")}</p>
+                  <p className="text-xs text-slate-400">{t("aiStudio.uploadDragHint")}</p>
                 </div>
               </div>
 
@@ -403,18 +405,18 @@ export function AIStudio() {
                   <SelectContent>{backgroundOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
                 </Select>
                 <Select value={selectedFolderId} onValueChange={setSelectedFolderId}>
-                  <SelectTrigger className="w-[200px]"><SelectValue placeholder="Save in folder" /></SelectTrigger>
+                  <SelectTrigger className="w-[200px]"><SelectValue placeholder={t("aiStudio.saveInFolder")} /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Unfiled</SelectItem>
+                    <SelectItem value="all">{t("aiStudio.unfiled")}</SelectItem>
                     {folders.map((folder) => <SelectItem key={folder.id} value={folder.id}>{folder.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Button onClick={handleEnhance} disabled={selectedImages.length === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
-                  <Sparkles className="h-4 w-4 mr-2" />Enhance All & Save
+                  <Sparkles className="h-4 w-4 mr-2" />{t("aiStudio.enhance")}
                 </Button>
-                <div className="flex items-center gap-1 pl-2 border-l border-slate-200">
+                <div className="flex items-center gap-1 ps-2 border-s border-slate-200">
                   <Select value={packPreset} onValueChange={(v) => setPackPreset(v as typeof packPreset)}>
-                    <SelectTrigger className="w-[180px]"><SelectValue placeholder="Pack preset" /></SelectTrigger>
+                    <SelectTrigger className="w-[180px]"><SelectValue placeholder={t("aiStudio.packPreset")} /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="starter">Starter (3 shots)</SelectItem>
                       <SelectItem value="full">Full merchant pack (5)</SelectItem>
@@ -429,16 +431,16 @@ export function AIStudio() {
                     className="border-purple-200 text-purple-700 hover:bg-purple-50"
                     title="Generate a full gallery of shots from one product image"
                   >
-                    <Package className="h-4 w-4 mr-2" />Generate Pack
+                    <Package className="h-4 w-4 mr-2" />{t("aiStudio.generatePack")}
                   </Button>
                 </div>
               </div>
 
               <div className="flex items-center gap-3 mt-5 mb-3">
-                <h2 className="text-base font-semibold text-slate-900">{selectedFolderId === "all" ? "All Images" : folders.find((f) => f.id === selectedFolderId)?.name || "Folder"}</h2>
+                <h2 className="text-base font-semibold text-slate-900">{selectedFolderId === "all" ? t("aiStudio.allImages") : folders.find((f) => f.id === selectedFolderId)?.name || "Folder"}</h2>
                 <div className="relative flex-1 max-w-sm">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input placeholder="Search background or folder..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+                  <Input placeholder={t("aiStudio.search")} value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
                 </div>
               </div>
 
@@ -447,8 +449,8 @@ export function AIStudio() {
               ) : filteredImages.length === 0 ? (
                 <div className="text-center py-12 border rounded-lg">
                   <Sparkles className="h-12 w-12 text-slate-200 mx-auto mb-3" />
-                  <h3 className="text-base font-medium text-slate-700">No images found</h3>
-                  <p className="text-slate-400 text-sm mt-1">Enhance an image or change folder filter</p>
+                  <h3 className="text-base font-medium text-slate-700">{t("aiStudio.empty")}</h3>
+                  <p className="text-slate-400 text-sm mt-1">{t("aiStudio.emptyHint")}</p>
                 </div>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -493,14 +495,14 @@ export function AIStudio() {
         }}
       >
         <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle>Image Preview</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("aiStudio.preview")}</DialogTitle></DialogHeader>
           {previewImage && (
             <div className="space-y-4">
               <img src={previewImage.imageUrl} alt="Preview" className="w-full max-h-[55vh] object-contain rounded-lg bg-slate-50" />
 
               <div className="space-y-2 border-t pt-4">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-slate-900">Refine this image</p>
+                  <p className="text-sm font-semibold text-slate-900">{t("aiStudio.refineTitle")}</p>
                   <div className="flex items-center gap-2">
                     {refineHistory.length > 0 && (
                       <Button
@@ -511,10 +513,10 @@ export function AIStudio() {
                         className="h-7 px-2.5 text-xs"
                       >
                         {undoing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
-                        Undo
+                        {undoing ? t("aiStudio.undoing") : t("aiStudio.undo")}
                       </Button>
                     )}
-                    <span className="text-xs text-slate-500">Costs 1 credit</span>
+                    <span className="text-xs text-slate-500">{t("aiStudio.refineCost")}</span>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -536,7 +538,7 @@ export function AIStudio() {
                 </div>
                 <div className="flex gap-2">
                   <Input
-                    placeholder="e.g. crop tighter, add soft shadows, change to outdoor scene..."
+                    placeholder={t("aiStudio.refinePlaceholder")}
                     value={refineInstruction}
                     onChange={(e) => setRefineInstruction(e.target.value)}
                     onKeyDown={(e) => {
@@ -548,7 +550,7 @@ export function AIStudio() {
                     disabled={refineInstruction.trim().length < 3}
                     className="bg-teal-600 hover:bg-teal-700 text-white whitespace-nowrap"
                   >
-                    <Sparkles className="h-4 w-4 mr-2" />Refine
+                    <Sparkles className="h-4 w-4 mr-2" />{t("aiStudio.refine")}
                   </Button>
                 </div>
               </div>
@@ -559,7 +561,7 @@ export function AIStudio() {
 
       <Dialog open={!!renameFolderId} onOpenChange={() => setRenameFolderId(null)}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Rename Folder</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("aiStudio.renameFolder")}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Input value={renameFolderName} onChange={(e) => setRenameFolderName(e.target.value)} />
             <div className="flex justify-end gap-2">

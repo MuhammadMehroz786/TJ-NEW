@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import api from "@/lib/api";
+import { useTranslation } from "react-i18next";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ const cardShadow = "0 10px 15px -3px rgba(15, 23, 42, 0.08)";
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function Billing() {
+  const { t } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -206,8 +208,8 @@ export function Billing() {
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">Credits &amp; Billing</h1>
-        <p className="text-slate-500 text-sm mt-1">Manage your AI credits and purchase history</p>
+        <h1 className="text-2xl font-semibold text-slate-900">{t("billing.title")}</h1>
+        <p className="text-slate-500 text-sm mt-1">{t("billing.subtitle")}</p>
       </div>
 
       {/* ── 3-column layout ────────────────────────────────────────────────── */}
@@ -222,7 +224,7 @@ export function Billing() {
             <Card className="border-slate-200" style={{ boxShadow: cardShadow }}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Weekly</p>
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">{t("billing.weekly")}</p>
                   <div className="h-6 w-6 rounded-md bg-teal-50 flex items-center justify-center">
                     <RefreshCw className="h-3 w-3 text-teal-600" />
                   </div>
@@ -235,7 +237,7 @@ export function Billing() {
                   <div className="h-full bg-teal-500 rounded-full transition-all" style={{ width: `${weeklyPct}%` }} />
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1.5">
-                  Reset in {balance ? daysUntil(balance.nextResetAt) : "—"} days
+                  {t("billing.resetIn", { days: balance ? daysUntil(balance.nextResetAt) : "—" })}
                 </p>
               </CardContent>
             </Card>
@@ -244,7 +246,7 @@ export function Billing() {
             <Card className="border-slate-200" style={{ boxShadow: cardShadow }}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Purchased</p>
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">{t("billing.purchased")}</p>
                   <div className="h-6 w-6 rounded-md bg-indigo-50 flex items-center justify-center">
                     <Wallet className="h-3 w-3 text-indigo-500" />
                   </div>
@@ -274,7 +276,7 @@ export function Billing() {
                 className="text-[11px] font-semibold uppercase tracking-widest"
                 style={{ color: "#94A3B8" }}
               >
-                Total Available
+                {t("billing.total")}
               </p>
             </div>
             <p className="text-4xl font-bold text-white leading-none">
@@ -485,7 +487,7 @@ export function Billing() {
               <div className="h-5 w-5 rounded-md bg-teal-500/20 flex items-center justify-center">
                 <CreditCard className="h-3 w-3 text-teal-400" />
               </div>
-              <p className="text-sm font-semibold text-white">Order Summary</p>
+              <p className="text-sm font-semibold text-white">{t("billing.orderSummary")}</p>
             </div>
 
             {/* Rows */}
@@ -537,7 +539,7 @@ export function Billing() {
                     <div className="w-5 h-5 bg-white rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0" style={{ color: "#0D9488" }}>
                       S
                     </div>
-                    Pay ${computedPrice.toFixed(2)} with Stripe
+                    {t("billing.checkout", { amount: computedPrice.toFixed(2) })}
                     <ChevronRight className="h-4 w-4 ml-auto" />
                   </>
                 )}
@@ -546,7 +548,7 @@ export function Billing() {
               <div className="flex items-center justify-center gap-1.5 pt-1">
                 <BadgeCheck className="h-3.5 w-3.5" style={{ color: "#64748B" }} />
                 <span className="text-[11px] font-semibold tracking-widest uppercase" style={{ color: "#64748B" }}>
-                  Secure Payment
+                  {t("billing.secure")}
                 </span>
               </div>
 
@@ -580,7 +582,7 @@ export function Billing() {
             <div className="flex items-center justify-between px-4 py-3.5" style={{ borderBottom: "1px solid #E2E8F0" }}>
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4" style={{ color: "#64748B" }} />
-                <p className="text-sm font-semibold text-slate-900">Recent Activity</p>
+                <p className="text-sm font-semibold text-slate-900">{t("billing.recent")}</p>
               </div>
               {totalPurchased > 0 && (
                 <Badge variant="secondary" className="text-xs">{totalPurchased} Cr. total</Badge>
