@@ -1,7 +1,13 @@
 import { Router, Response } from "express";
 import { PrismaClient, Prisma } from "@prisma/client";
-import multer from "multer";
-import AdmZip from "adm-zip";
+// multer ships its own @types which pull in a second @types/express-serve-static-core
+// tree — that conflicts with the one used by express-rate-limit elsewhere in
+// this project. We don't need multer's types here (only multer.memoryStorage
+// and single()), so we require it untyped to keep the @types graph clean.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const multer = require("multer") as any;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const AdmZip = require("adm-zip") as any;
 import { promises as fsp } from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -351,7 +357,7 @@ router.post("/bulk-import", importUpload, async (req: AuthRequest, res: Response
     //   2. application/json with { rows: [...] }  — legacy path, still used when
     //      the merchant doesn't have a ZIP to send
     let rows: BulkImportRow[] | null = null;
-    const file = (req as AuthRequest & { file?: Express.Multer.File }).file;
+    const file = (req as AuthRequest & { file?: { buffer?: Buffer; originalname?: string; size?: number } }).file;
 
     if (typeof req.body?.rows === "string") {
       try {
