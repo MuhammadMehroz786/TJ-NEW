@@ -514,7 +514,10 @@ export function Products() {
   const [importFileName, setImportFileName] = useState("");
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
+  const [importZipFile, setImportZipFile] = useState<File | null>(null);
+  const [importZipError, setImportZipError] = useState("");
   const importFileRef = useRef<HTMLInputElement>(null);
+  const importZipRef = useRef<HTMLInputElement>(null);
 
   // Enhance existing product (from marketplace sync or manual) state
   const [enhanceProduct, setEnhanceProduct] = useState<Product | null>(null);
@@ -805,6 +808,23 @@ export function Products() {
     setImportRows([]);
     setImportFileName("");
     setImportError("");
+    setImportZipFile(null);
+    setImportZipError("");
+  };
+
+  const handleImportZip = (file: File) => {
+    setImportZipError("");
+    if (file.size > 100 * 1024 * 1024) {
+      setImportZipError("ZIP is too large (max 100 MB)");
+      setImportZipFile(null);
+      return;
+    }
+    if (!/\.zip$/i.test(file.name)) {
+      setImportZipError("File must be a .zip");
+      setImportZipFile(null);
+      return;
+    }
+    setImportZipFile(file);
   };
 
   const handleImportFile = async (file: File) => {
@@ -845,16 +865,39 @@ export function Products() {
     if (importRows.length === 0) return;
     setImporting(true);
     try {
-      const res = await api.post("/products/bulk-import", { rows: importRows });
-      const { created, errors, total } = res.data as { created: number; errors: { row: number; error: string }[]; total: number };
-      if (errors.length > 0) {
-        toast.success(`Imported ${created} of ${total} — ${errors.length} row(s) had errors.`);
+      let res;
+      if (importZipFile) {
+        const fd = new FormData();
+        fd.append("rows", JSON.stringify(importRows));
+        fd.append("zip", importZipFile);
+        res = await api.post("/products/bulk-import", fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
       } else {
-        toast.success(`Imported ${created} product(s)`);
+        res = await api.post("/products/bulk-import", { rows: importRows });
+      }
+      const { created, errors, total, photos } = res.data as {
+        created: number;
+        errors: { row: number; error: string }[];
+        total: number;
+        photos?: { matched: number; unmatched: string[]; invalid: string[] } | null;
+      };
+      const photoSuffix = photos ? ` · ${photos.matched} photo(s) matched` : "";
+      if (errors.length > 0) {
+        toast.success(`Imported ${created} of ${total} — ${errors.length} row(s) had errors.${photoSuffix}`);
+      } else {
+        toast.success(`Imported ${created} product(s)${photoSuffix}`);
+      }
+      if (photos && (photos.unmatched.length > 0 || photos.invalid.length > 0)) {
+        const lines: string[] = [];
+        if (photos.unmatched.length) lines.push(`${photos.unmatched.length} photo(s) had no matching SKU`);
+        if (photos.invalid.length) lines.push(`${photos.invalid.length} file(s) weren't valid images`);
+        toast.warning(lines.join(" · "));
       }
       setImportOpen(false);
       setImportRows([]);
       setImportFileName("");
+      setImportZipFile(null);
       fetchProducts();
     } catch (err: unknown) {
       const message =
@@ -1716,38 +1759,91 @@ export function Products() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="text-sm text-slate-600">
-              Upload a CSV with your products. Required column: <code className="px-1 bg-slate-100 rounded">title</code> and <code className="px-1 bg-slate-100 rounded">price</code>.
-              Optional: quantity, sku, status, description, imageUrl, category, vendor, tags.
+              Upload a CSV with your products, plus an optional ZIP of photos named by SKU.
+              {" "}
+              <a href="/import-guide" target="_blank" rel="noopener" className="text-teal-700 underline font-medium">
+                See full instructions →
+              </a>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={downloadTemplate}>
-                <Download className="h-4 w-4 mr-2" />
-                Download template
-              </Button>
-              <input
-                ref={importFileRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleImportFile(f);
-                  e.target.value = "";
-                }}
-              />
-              <Button variant="outline" size="sm" onClick={() => importFileRef.current?.click()}>
-                <Upload className="h-4 w-4 mr-2" />
-                Choose file
-              </Button>
-              {importFileName && (
-                <span className="text-xs text-slate-500 truncate max-w-[200px]">{importFileName}</span>
-              )}
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs text-slate-500 mb-1 block">Step 1 — Products CSV (required)</Label>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={downloadTemplate}>
+                    <Download className="h-4 w-4 mr-2" />
+                    Download template
+                  </Button>
+                  <input
+                    ref={importFileRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleImportFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button variant="outline" size="sm" onClick={() => importFileRef.current?.click()}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Choose CSV
+                  </Button>
+                  {importFileName && (
+                    <span className="text-xs text-slate-500 truncate max-w-[200px]">{importFileName}</span>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs text-slate-500 mb-1 block">
+                  Step 2 — Photos ZIP (optional, name files by SKU e.g. SKU-001.jpg)
+                </Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={importZipRef}
+                    type="file"
+                    accept=".zip,application/zip"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleImportZip(f);
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button variant="outline" size="sm" onClick={() => importZipRef.current?.click()}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Choose ZIP
+                  </Button>
+                  {importZipFile ? (
+                    <>
+                      <span className="text-xs text-slate-600 truncate max-w-[200px]">
+                        {importZipFile.name} ({(importZipFile.size / 1024 / 1024).toFixed(1)} MB)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setImportZipFile(null)}
+                        className="text-xs text-red-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-slate-400">No ZIP selected</span>
+                  )}
+                </div>
+              </div>
             </div>
 
             {importError && (
               <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-md text-sm">
                 {importError}
+              </div>
+            )}
+
+            {importZipError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-md text-sm">
+                {importZipError}
               </div>
             )}
 

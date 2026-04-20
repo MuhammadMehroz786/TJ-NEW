@@ -1,5 +1,10 @@
 import { Router, Response } from "express";
 import { PrismaClient, Prisma } from "@prisma/client";
+import multer from "multer";
+import AdmZip from "adm-zip";
+import { promises as fsp } from "fs";
+import path from "path";
+import crypto from "crypto";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { ShopifyService, ShopifyAuthError, ShopifyApiError } from "../services/shopify";
 import { tijarflowProductToShopify } from "../services/shopifyMapper";
@@ -210,10 +215,156 @@ interface BulkImportRow {
 }
 
 const MAX_IMPORT_ROWS = 500;
+const MAX_ZIP_BYTES = 100 * 1024 * 1024;          // 100 MB compressed
+const MAX_ZIP_ENTRY_BYTES = 10 * 1024 * 1024;     // 10 MB per image (decoded)
+const MAX_ZIP_ENTRIES = 2000;                     // sanity cap
+const IMAGE_EXT_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
 
-router.post("/bulk-import", async (req: AuthRequest, res: Response): Promise<void> => {
+// Multer accepts a zip + a JSON text field for rows. Stored in memory — images
+// get streamed to disk ourselves because we rename them by SKU match.
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_ZIP_BYTES, files: 1 },
+}).single("zip");
+
+// Detect image mime by magic bytes. Used to reject non-image files smuggled
+// inside the ZIP (e.g. an .exe renamed to .jpg).
+function detectImageMimeFromBytes(buf: Buffer): "image/png" | "image/jpeg" | "image/webp" | null {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (
+    buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+    buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50
+  ) return "image/webp";
+  return null;
+}
+
+/**
+ * Walk a ZIP buffer and return a map: `SKU-001` → array of saved /media URLs,
+ * ordered by the filename suffix (`-1`, `-2`, etc.). Files are written to
+ * `storage/products/{userId}/...` with a random name so the original filename
+ * can't be used for directory-traversal or collisions.
+ *
+ * Filename convention (case-insensitive, whitespace trimmed):
+ *   SKU-001.jpg              → primary image
+ *   SKU-001-2.jpg, SKU-001_2 → additional images in order
+ *
+ * Entries that don't have a matching SKU or aren't valid images are ignored
+ * and counted in `unmatched` / `invalid` — those are surfaced in the response
+ * so the merchant can fix filenames.
+ */
+async function extractProductImagesFromZip(
+  zipBuf: Buffer,
+  userId: string,
+  knownSkus: Set<string>,
+): Promise<{
+  bySku: Map<string, string[]>;
+  matched: number;
+  unmatched: string[];
+  invalid: string[];
+}> {
+  const zip = new AdmZip(zipBuf);
+  const entries = zip.getEntries();
+  if (entries.length > MAX_ZIP_ENTRIES) {
+    throw new Error(`ZIP contains ${entries.length} entries — max ${MAX_ZIP_ENTRIES} allowed`);
+  }
+
+  const storageRoot = path.resolve(process.cwd(), "storage");
+  const relativeDir = path.join("products", userId);
+  const absDir = path.join(storageRoot, relativeDir);
+  await fsp.mkdir(absDir, { recursive: true });
+
+  // Buffer per-SKU matches first so we can sort by the trailing index before
+  // writing. e.g. SKU-001-2 should land at images[1], not in arrival order.
+  const buckets = new Map<string, { order: number; url: string }[]>();
+  const unmatched: string[] = [];
+  const invalid: string[] = [];
+  let matched = 0;
+
+  for (const entry of entries) {
+    if (entry.isDirectory) continue;
+    // Strip any path prefix — we only care about the basename. This also
+    // neutralises path traversal attempts like ../../etc/passwd.jpg.
+    const name = path.basename(entry.entryName);
+    if (!name || name.startsWith(".")) continue;
+
+    const ext = path.extname(name).toLowerCase();
+    const expectedMime = IMAGE_EXT_MIME[ext];
+    if (!expectedMime) {
+      invalid.push(name);
+      continue;
+    }
+
+    const stem = name.slice(0, name.length - ext.length).trim();
+    // Match pattern: optional trailing -N or _N indicates image order
+    const orderMatch = stem.match(/^(.+?)[-_](\d+)$/);
+    const skuKey = (orderMatch ? orderMatch[1] : stem).trim().toLowerCase();
+    const order = orderMatch ? parseInt(orderMatch[2], 10) : 1;
+
+    if (!knownSkus.has(skuKey)) {
+      unmatched.push(name);
+      continue;
+    }
+
+    const data = entry.getData();
+    if (data.length === 0 || data.length > MAX_ZIP_ENTRY_BYTES) {
+      invalid.push(name);
+      continue;
+    }
+    const actualMime = detectImageMimeFromBytes(data);
+    if (!actualMime) {
+      invalid.push(name);
+      continue;
+    }
+
+    const outExt = actualMime === "image/png" ? "png" : actualMime === "image/jpeg" ? "jpg" : "webp";
+    const randomName = `${Date.now()}-${crypto.randomUUID()}.${outExt}`;
+    const relPath = path.join(relativeDir, randomName).replaceAll("\\", "/");
+    const absPath = path.join(storageRoot, relPath);
+    await fsp.writeFile(absPath, data);
+
+    const bucket = buckets.get(skuKey) ?? [];
+    bucket.push({ order, url: `/media/${relPath}` });
+    buckets.set(skuKey, bucket);
+    matched++;
+  }
+
+  const bySku = new Map<string, string[]>();
+  for (const [sku, list] of buckets.entries()) {
+    list.sort((a, b) => a.order - b.order);
+    bySku.set(sku, list.map((x) => x.url));
+  }
+
+  return { bySku, matched, unmatched, invalid };
+}
+
+router.post("/bulk-import", importUpload, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const rows = Array.isArray(req.body?.rows) ? (req.body.rows as BulkImportRow[]) : null;
+    // Two content types supported:
+    //   1. multipart/form-data with fields: rows (JSON string), zip (file, optional)
+    //   2. application/json with { rows: [...] }  — legacy path, still used when
+    //      the merchant doesn't have a ZIP to send
+    let rows: BulkImportRow[] | null = null;
+    const file = (req as AuthRequest & { file?: Express.Multer.File }).file;
+
+    if (typeof req.body?.rows === "string") {
+      try {
+        const parsed = JSON.parse(req.body.rows);
+        if (Array.isArray(parsed)) rows = parsed as BulkImportRow[];
+      } catch {
+        res.status(400).json({ error: "rows field is not valid JSON", code: "VALIDATION_ERROR" });
+        return;
+      }
+    } else if (Array.isArray(req.body?.rows)) {
+      rows = req.body.rows as BulkImportRow[];
+    }
+
     if (!rows || rows.length === 0) {
       res.status(400).json({ error: "rows array is required", code: "VALIDATION_ERROR" });
       return;
@@ -292,6 +443,45 @@ router.post("/bulk-import", async (req: AuthRequest, res: Response): Promise<voi
       else errors.push({ row: i + 1, error: result.error });
     });
 
+    // If a ZIP was uploaded, match its images to rows by SKU filename and
+    // attach the resulting /media URLs. ZIP images win over any imageUrl in
+    // the CSV (because the merchant explicitly uploaded the photo).
+    let zipStats: { matched: number; unmatched: string[]; invalid: string[] } | null = null;
+    if (file && file.buffer && file.buffer.length > 0) {
+      const knownSkus = new Set<string>();
+      for (const r of valid) {
+        if (typeof r.sku === "string" && r.sku.trim()) knownSkus.add(r.sku.trim().toLowerCase());
+      }
+      if (knownSkus.size === 0) {
+        res.status(400).json({
+          error: "ZIP upload requires a 'sku' column in your CSV so photos can be matched to products.",
+          code: "SKU_REQUIRED_FOR_ZIP",
+        });
+        return;
+      }
+      try {
+        const extracted = await extractProductImagesFromZip(file.buffer, req.auth!.userId!, knownSkus);
+        zipStats = {
+          matched: extracted.matched,
+          unmatched: extracted.unmatched.slice(0, 20),
+          invalid: extracted.invalid.slice(0, 20),
+        };
+        for (const r of valid) {
+          const key = typeof r.sku === "string" ? r.sku.trim().toLowerCase() : "";
+          const zipImages = key ? extracted.bySku.get(key) : undefined;
+          if (zipImages && zipImages.length > 0) {
+            r.images = zipImages as unknown as Prisma.InputJsonValue;
+          }
+        }
+      } catch (zipErr: any) {
+        res.status(400).json({
+          error: zipErr?.message || "Couldn't read the ZIP file",
+          code: "INVALID_ZIP",
+        });
+        return;
+      }
+    }
+
     let created = 0;
     if (valid.length > 0) {
       // skipDuplicates: a second row with the same [sku, userId] unique combo
@@ -305,9 +495,14 @@ router.post("/bulk-import", async (req: AuthRequest, res: Response): Promise<voi
       skipped: valid.length - created,
       errors,
       total: rows.length,
-      message: `Imported ${created} product(s)${errors.length ? `, ${errors.length} row(s) had errors` : ""}`,
+      photos: zipStats,
+      message: `Imported ${created} product(s)${errors.length ? `, ${errors.length} row(s) had errors` : ""}${zipStats ? ` · ${zipStats.matched} photo(s) matched` : ""}`,
     });
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.code === "LIMIT_FILE_SIZE") {
+      res.status(400).json({ error: `ZIP is too large (max ${Math.round(MAX_ZIP_BYTES / 1024 / 1024)} MB)`, code: "ZIP_TOO_LARGE" });
+      return;
+    }
     console.error("Bulk import error:", err);
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   }

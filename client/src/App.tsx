@@ -9,6 +9,7 @@ import { Products } from "@/pages/Products";
 import { Marketplaces } from "@/pages/Marketplaces";
 import { Settings } from "@/pages/Settings";
 import { ShopifyGuide } from "@/pages/ShopifyGuide";
+import { ImportGuide } from "@/pages/ImportGuide";
 import { Advertising } from "@/pages/Advertising";
 import { CreatorDashboard } from "@/pages/CreatorDashboard";
 import { Campaigns } from "@/pages/Campaigns";
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="/ai-studio" element={<ProtectedRoute role="MERCHANT"><AIStudio /></ProtectedRoute>} />
           <Route path="/billing" element={<ProtectedRoute role="MERCHANT"><Billing /></ProtectedRoute>} />
           <Route path="/shopify-guide" element={<ProtectedRoute role="MERCHANT"><ShopifyGuide /></ProtectedRoute>} />
+          <Route path="/import-guide" element={<ProtectedRoute role="MERCHANT"><ImportGuide /></ProtectedRoute>} />
 
           {/* Admin-only */}
           <Route path="/admin" element={<ProtectedRoute role="ADMIN"><Admin /></ProtectedRoute>} />
