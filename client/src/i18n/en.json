@@ -48,7 +48,32 @@
     "submitting": "Signing in...",
     "noAccount": "Don't have an account?",
     "createOne": "Create one",
-    "adminLogin": "Admin sign-in"
+    "adminLogin": "Admin sign-in",
+    "forgotPassword": "Forgot password?"
+  },
+  "forgotPassword": {
+    "title": "Reset your password",
+    "subtitle": "Enter your email and we'll send a reset link",
+    "submit": "Send reset link",
+    "sending": "Sending...",
+    "backToLogin": "Back to sign in",
+    "sentFallback": "If an account exists for that email, a reset link has been sent.",
+    "error": "Couldn't send the reset link. Please try again."
+  },
+  "resetPassword": {
+    "title": "Choose a new password",
+    "subtitle": "Set a new password for your TijarFlow account",
+    "newPasswordLabel": "New password",
+    "confirmLabel": "Confirm new password",
+    "placeholder": "At least 8 characters",
+    "submit": "Update password",
+    "submitting": "Updating...",
+    "success": "Password updated. Redirecting to sign in...",
+    "goToLogin": "Go to sign in",
+    "missingToken": "This reset link is missing a token. Request a new one.",
+    "mismatch": "Passwords don't match",
+    "tooShort": "Password must be at least 8 characters",
+    "error": "Couldn't update password. The link may have expired."
   },
   "signup": {
     "roleTitle": "I want to...",

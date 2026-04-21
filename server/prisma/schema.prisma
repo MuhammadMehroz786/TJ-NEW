@@ -79,6 +79,7 @@ model User {
   aiStudioFolders        AiStudioFolder[]
   whatsappSessions       WhatsAppSession[]
   creditPurchases        CreditPurchase[]
+  passwordResetTokens    PasswordResetToken[]
 }
 
 model CreatorProfile {
@@ -335,6 +336,23 @@ model PendingSignup {
 
   @@index([email])
   @@index([otpExpiresAt])
+}
+
+// Short-lived password reset tokens. One active row per user (older rows are
+// invalidated by setting usedAt on request). Token itself is never stored —
+// only a sha256 hash, compared in constant time.
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // Short-lived login codes for admin passwordless authentication.

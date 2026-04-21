@@ -4,6 +4,8 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Login } from "@/pages/Login";
 import { Signup } from "@/pages/Signup";
+import { ForgotPassword } from "@/pages/ForgotPassword";
+import { ResetPassword } from "@/pages/ResetPassword";
 import { Dashboard } from "@/pages/Dashboard";
 import { Products } from "@/pages/Products";
 import { Marketplaces } from "@/pages/Marketplaces";
@@ -38,6 +40,8 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/admin-login" element={<AdminLogin />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         <Route
           element={

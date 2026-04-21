@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import { PrismaClient } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { generateOtp, hashOtp, verifyOtp, OTP_TTL_MINUTES, OTP_MAX_ATTEMPTS } from "../services/otp";
@@ -365,6 +366,145 @@ router.post("/admin/verify-code", async (req: AuthRequest, res: Response): Promi
     res.json({ token, user });
   } catch (err) {
     console.error("[admin-login] verify-code error:", (err as Error)?.message || err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── Password Reset ──────────────────────────────────────────────────────────
+// Flow:
+//  1. POST /forgot-password  → any request returns 200 with a generic message
+//     (don't leak whether the email exists). If the email is real and not an
+//     ADMIN account, generate a 32-byte token, store its sha256, email the
+//     plain token in a link to the app's /reset-password page.
+//  2. POST /reset-password   → verify token hash in constant time, check
+//     expiry + unused, update bcrypt hash, mark token used.
+const PASSWORD_RESET_TTL_MIN = 60;
+
+function publicAppUrl(): string {
+  return (process.env.PUBLIC_APP_URL || "https://app.tijarflow.com").replace(/\/+$/, "");
+}
+
+async function sendPasswordResetEmail(email: string, name: string, token: string): Promise<void> {
+  const link = `${publicAppUrl()}/reset-password?token=${encodeURIComponent(token)}`;
+  await sendMail({
+    to: email,
+    subject: "Reset your TijarFlow password",
+    text: `Hi ${name},\n\nWe received a request to reset your TijarFlow password.\n\nOpen this link to set a new password: ${link}\n\nThe link expires in ${PASSWORD_RESET_TTL_MIN} minutes and can only be used once. If you didn't request a reset, you can safely ignore this email — your password won't change.\n\n— TijarFlow`,
+    html: `<!doctype html>
+<html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:40px auto;padding:32px;background:#f8fafc;border-radius:12px;">
+  <h2 style="color:#0f172a;margin:0 0 16px">Reset your password</h2>
+  <p style="color:#475569;font-size:15px;line-height:1.5;margin:0 0 24px">Hi ${name}, we received a request to reset your TijarFlow password. Click the button below to choose a new one:</p>
+  <div style="text-align:center;margin:0 0 24px">
+    <a href="${link}" style="display:inline-block;background:#0d9488;color:#ffffff;text-decoration:none;font-weight:600;padding:14px 32px;border-radius:8px">Reset password</a>
+  </div>
+  <p style="color:#64748b;font-size:13px;line-height:1.5;margin:0 0 8px">Or paste this link into your browser:</p>
+  <p style="color:#0d9488;font-size:12px;word-break:break-all;margin:0 0 24px"><a href="${link}" style="color:#0d9488">${link}</a></p>
+  <p style="color:#64748b;font-size:13px;line-height:1.5;margin:0">This link expires in ${PASSWORD_RESET_TTL_MIN} minutes and can only be used once. If you didn't request a reset, you can safely ignore this email — your password won't change.</p>
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:32px 0"/>
+  <p style="color:#94a3b8;font-size:12px;margin:0">TijarFlow — AI-powered product photography</p>
+</body></html>`,
+  });
+}
+
+// POST /api/auth/forgot-password
+router.post("/forgot-password", async (req: AuthRequest, res: Response): Promise<void> => {
+  const genericResponse = () => res.json({
+    message: `If an account exists for that email, a password reset link has been sent. Check your inbox — the link expires in ${PASSWORD_RESET_TTL_MIN} minutes.`,
+  });
+
+  try {
+    const rawEmail = req.body?.email;
+    if (typeof rawEmail !== "string" || !rawEmail.trim()) {
+      res.status(400).json({ error: "Email is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    const email = rawEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(400).json({ error: "Please provide a valid email address", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true, role: true } });
+    // Always respond the same whether or not the user exists. Admins use
+    // passwordless OTP login, so we silently refuse to reset their passwords.
+    if (!user || user.role === "ADMIN") {
+      genericResponse();
+      return;
+    }
+
+    // Invalidate any previous unused tokens for this user so the new one is
+    // the only working link.
+    await prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const token = crypto.randomBytes(32).toString("base64url");
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MIN * 60 * 1000);
+
+    await prisma.passwordResetToken.create({
+      data: { userId: user.id, tokenHash, expiresAt },
+    });
+
+    try {
+      await sendPasswordResetEmail(email, user.name, token);
+    } catch (err) {
+      console.error("[forgot-password] email send failed:", (err as Error)?.message || err);
+      // Don't leak the failure — but log it. Merchant will see the generic
+      // "check your inbox" response and can retry; support can diagnose from logs.
+    }
+
+    genericResponse();
+  } catch (err) {
+    console.error("[forgot-password] error:", (err as Error)?.message || err);
+    // Still respond generically so attackers can't probe based on error shape
+    genericResponse();
+  }
+});
+
+// POST /api/auth/reset-password
+router.post("/reset-password", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { token, password } = req.body as { token?: unknown; password?: unknown };
+
+    if (typeof token !== "string" || !token.trim()) {
+      res.status(400).json({ error: "Reset token is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (typeof password !== "string" || password.length < 8) {
+      res.status(400).json({ error: "Password must be at least 8 characters", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const record = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { user: { select: { id: true, role: true } } },
+    });
+
+    if (!record || record.usedAt || record.expiresAt.getTime() < Date.now() || record.user.role === "ADMIN") {
+      res.status(400).json({
+        error: "This reset link is invalid or has expired. Request a new one.",
+        code: "INVALID_TOKEN",
+      });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: record.userId }, data: { password: passwordHash } }),
+      prisma.passwordResetToken.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+      // Cascade-invalidate any other outstanding tokens for this user
+      prisma.passwordResetToken.updateMany({
+        where: { userId: record.userId, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+
+    res.json({ message: "Password updated. You can now sign in with your new password." });
+  } catch (err) {
+    console.error("[reset-password] error:", (err as Error)?.message || err);
     res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   }
 });
