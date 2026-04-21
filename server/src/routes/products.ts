@@ -728,6 +728,7 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
       } catch (innerErr: any) {
         await refundOneCredit(prisma, req.auth!.userId, creditUsage.usedPool);
         const message = innerErr?.message || "Enhancement failed";
+        console.error(`[bulk-enhance] product ${product.id} failed:`, message, innerErr?.code);
         failed.push({
           productId: product.id,
           error: /Unable to process input image|INVALID_ARGUMENT|input image/i.test(message)
@@ -752,7 +753,15 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
         try {
           await enhanceOne(id);
         } catch (err) {
+          // Swallow everything — enhanceOne is supposed to push to failed[]
+          // on its own, but anything it lets escape (DB error, unexpected
+          // exception) must NOT kill the other workers.
           if (err instanceof AICreditError) creditsExhausted = true;
+          console.error(`[bulk-enhance] worker caught unexpected error for product ${id}:`, err);
+          // Make sure we at least recorded a failure for this id
+          if (!succeeded.some((s) => s.productId === id) && !failed.some((f) => f.productId === id)) {
+            failed.push({ productId: id, error: "Unexpected error" });
+          }
         }
       }
     };

@@ -57,14 +57,32 @@ export async function saveEnhancementToLibrary(
 
   let folderId: string | null = null;
   if (params.folderName) {
+    // Race-safe: when multiple bulk workers enhance for the same user at
+    // the same time, two of them can both see "folder doesn't exist yet"
+    // and then both try to create — the second hits P2002. We catch the
+    // unique-violation and look up the row the other worker just created.
     const existing = await prisma.aiStudioFolder.findUnique({
       where: { userId_name: { userId: params.userId, name: params.folderName } },
     });
-    folderId = existing?.id ?? (
-      await prisma.aiStudioFolder.create({
-        data: { userId: params.userId, name: params.folderName },
-      })
-    ).id;
+    if (existing) {
+      folderId = existing.id;
+    } else {
+      try {
+        const created = await prisma.aiStudioFolder.create({
+          data: { userId: params.userId, name: params.folderName },
+        });
+        folderId = created.id;
+      } catch (err: any) {
+        if (String(err?.code) === "P2002") {
+          const other = await prisma.aiStudioFolder.findUnique({
+            where: { userId_name: { userId: params.userId, name: params.folderName } },
+          });
+          folderId = other?.id ?? null;
+        } else {
+          throw err;
+        }
+      }
+    }
   }
 
   const record = await prisma.aiStudioImage.create({
