@@ -82,8 +82,6 @@ export function AffiliateLinks() {
     toast.success("Link copied to clipboard");
   };
 
-  const getTrackUrl = (slug: string) => `${window.location.origin}/api/affiliate-links/track/${slug}`;
-
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
