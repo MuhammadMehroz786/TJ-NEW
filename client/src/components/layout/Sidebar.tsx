@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Package, Store, Megaphone, Settings, LogOut, ChevronDown, Tag, CreditCard, Sparkles, Wallet, ShieldCheck, Globe } from "lucide-react";
+import { LayoutDashboard, Package, Store, Megaphone, Settings, LogOut, ChevronDown, Tag, CreditCard, Sparkles, Wallet, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useTranslation } from "react-i18next";
 import {
@@ -10,8 +10,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import api from "@/lib/api";
-import { setLanguage, type SupportedLang } from "@/i18n";
+import type { SupportedLang } from "@/i18n";
 
 export function Sidebar() {
   const { user, logout } = useAuth();
@@ -38,15 +37,6 @@ export function Sidebar() {
   const handleLogout = () => {
     logout();
     navigate("/login");
-  };
-
-  const handleLanguageChange = async (lang: SupportedLang) => {
-    setLanguage(lang);
-    // Persist to backend so it syncs across devices. Silent failure — UI flip
-    // is already applied locally via setLanguage().
-    try {
-      await api.patch("/user/language", { language: lang });
-    } catch { /* non-critical */ }
   };
 
   const currentLang = (i18n.language?.slice(0, 2) || "en") as SupportedLang;
@@ -89,27 +79,6 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
-
-      {/* Language toggle row */}
-      <div className="px-3 py-2 border-t border-slate-800">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-3 w-full px-3 py-2 rounded-lg hover:bg-slate-800 transition-colors text-sm text-slate-400 hover:text-slate-200">
-              <Globe className="h-4 w-4 shrink-0" />
-              <span className="flex-1 text-start">{t("language.switch")}</span>
-              <span className="text-xs text-slate-500 uppercase">{currentLang}</span>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem onClick={() => handleLanguageChange("en")} className="cursor-pointer">
-              {t("language.en")} {currentLang === "en" && "✓"}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleLanguageChange("ar")} className="cursor-pointer">
-              {t("language.ar")} {currentLang === "ar" && "✓"}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
 
       <div className="p-3 border-t border-slate-800">
         <DropdownMenu>

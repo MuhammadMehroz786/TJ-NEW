@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { CreatorSidebar } from "./CreatorSidebar";
+import { TopBar } from "./TopBar";
 import { useAuth } from "@/hooks/useAuth";
 import { useTranslation } from "react-i18next";
 
@@ -12,8 +13,9 @@ export function AppLayout() {
   return (
     <div className="min-h-screen bg-slate-50">
       {user?.role === "CREATOR" ? <CreatorSidebar /> : <Sidebar />}
-      <main className={`${isRtl ? "mr-64" : "ml-64"} min-h-screen`}>
-        <div className="p-8">
+      <main className={`${isRtl ? "mr-64" : "ml-64"} min-h-screen flex flex-col`}>
+        <TopBar />
+        <div className="p-8 flex-1">
           <Outlet />
         </div>
       </main>
