@@ -761,7 +761,11 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
           const created = await prisma.product.create({
             data: {
               userId: req.auth!.userId,
-              title: `${src.title} (AI)`.slice(0, 255),
+              // Title stays verbatim — the AI provenance is carried by the
+              // "ai-enhanced" tag below, rendered as a badge in the UI so
+              // merchants can see what's AI-generated without the suffix
+              // polluting marketplace pushes or search results.
+              title: src.title,
               description: src.description,
               price: src.price,
               compareAtPrice: src.compareAtPrice,

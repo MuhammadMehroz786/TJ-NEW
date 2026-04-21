@@ -1215,9 +1215,20 @@ export function Products() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <p className="font-medium text-slate-800 truncate max-w-[200px]">
-                        {product.title}
-                      </p>
+                      <div className="flex items-center gap-1.5 max-w-[220px]">
+                        <p className="font-medium text-slate-800 truncate">
+                          {product.title}
+                        </p>
+                        {product.tags?.includes("ai-enhanced") && (
+                          <span
+                            title="Generated with AI Studio"
+                            className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-50 to-fuchsia-50 text-amber-700 border border-amber-200"
+                          >
+                            <Sparkles className="h-2.5 w-2.5" />
+                            AI
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell className="text-slate-500 text-sm">
                       {product.sku || "—"}
@@ -2052,7 +2063,7 @@ export function Products() {
                   />
                   <div className="flex-1">
                     <p className="text-sm font-medium text-slate-800">Save as new products (tagged AI)</p>
-                    <p className="text-xs text-slate-500">Creates new draft products with "(AI)" in the title and an "ai-enhanced" tag. Originals untouched.</p>
+                    <p className="text-xs text-slate-500">Creates new draft copies marked with an "AI" badge. Originals untouched.</p>
                   </div>
                 </label>
               </div>
