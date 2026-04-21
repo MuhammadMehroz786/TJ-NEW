@@ -20,6 +20,7 @@ export function Settings() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
+  const [sendingResetEmail, setSendingResetEmail] = useState(false);
 
   const handleProfile = async (e: FormEvent) => {
     e.preventDefault();
@@ -35,6 +36,19 @@ export function Settings() {
       toast.error(message);
     } finally {
       setSavingProfile(false);
+    }
+  };
+
+  const handleSendResetEmail = async () => {
+    if (!user?.email) return;
+    setSendingResetEmail(true);
+    try {
+      await api.post("/auth/forgot-password", { email: user.email });
+      toast.success(t("settings.resetEmailSent", { email: user.email }));
+    } catch {
+      toast.error(t("settings.resetEmailFailed"));
+    } finally {
+      setSendingResetEmail(false);
     }
   };
 
@@ -153,6 +167,17 @@ export function Settings() {
                 {savingPassword ? t("settings.changingPassword") : t("settings.changePassword")}
               </Button>
             </form>
+            <div className="mt-4 pt-4 border-t border-slate-100 text-sm text-slate-600">
+              {t("settings.forgotCurrentPrompt")}{" "}
+              <button
+                type="button"
+                onClick={handleSendResetEmail}
+                disabled={sendingResetEmail}
+                className="text-teal-600 hover:text-teal-700 font-medium disabled:opacity-60"
+              >
+                {sendingResetEmail ? t("settings.sendingResetEmail") : t("settings.sendResetEmail")}
+              </button>
+            </div>
           </CardContent>
         </Card>
       </div>

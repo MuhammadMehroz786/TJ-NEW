@@ -203,7 +203,12 @@
     "newPassword": "كلمة المرور الجديدة",
     "newPasswordHint": "6 أحرف على الأقل",
     "changePassword": "تغيير كلمة المرور",
-    "changingPassword": "جارٍ التحديث..."
+    "changingPassword": "جارٍ التحديث...",
+    "forgotCurrentPrompt": "هل نسيت كلمة المرور الحالية؟",
+    "sendResetEmail": "أرسل لي رابط إعادة التعيين",
+    "sendingResetEmail": "جارٍ الإرسال...",
+    "resetEmailSent": "تم إرسال رابط إعادة التعيين إلى {{email}}. تحقّق من بريدك.",
+    "resetEmailFailed": "تعذّر إرسال البريد. يرجى المحاولة مرة أخرى."
   },
   "products": {
     "title": "المنتجات",

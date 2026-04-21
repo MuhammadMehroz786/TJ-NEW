@@ -203,7 +203,12 @@
     "newPassword": "New password",
     "newPasswordHint": "At least 6 characters",
     "changePassword": "Change password",
-    "changingPassword": "Updating..."
+    "changingPassword": "Updating...",
+    "forgotCurrentPrompt": "Forgot your current password?",
+    "sendResetEmail": "Email me a reset link",
+    "sendingResetEmail": "Sending...",
+    "resetEmailSent": "Reset link sent to {{email}}. Check your inbox.",
+    "resetEmailFailed": "Couldn't send the reset email. Please try again."
   },
   "products": {
     "title": "Products",
