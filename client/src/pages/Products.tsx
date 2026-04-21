@@ -522,11 +522,13 @@ export function Products() {
   // Enhance existing product (from marketplace sync or manual) state
   const [enhanceProduct, setEnhanceProduct] = useState<Product | null>(null);
   const [enhanceProductScene, setEnhanceProductScene] = useState("studio");
+  const [enhanceProductSceneText, setEnhanceProductSceneText] = useState("");
   const [enhanceProductRunning, setEnhanceProductRunning] = useState(false);
 
   // Bulk enhance (multiple products at once) state
   const [bulkEnhanceOpen, setBulkEnhanceOpen] = useState(false);
   const [bulkEnhanceScene, setBulkEnhanceScene] = useState("studio");
+  const [bulkEnhanceSceneText, setBulkEnhanceSceneText] = useState("");
   const [bulkEnhanceMode, setBulkEnhanceMode] = useState<"prepend" | "overwrite" | "new">("prepend");
   const [bulkEnhanceRunning, setBulkEnhanceRunning] = useState(false);
   const [bulkEnhanceProgress, setBulkEnhanceProgress] = useState<{ done: number; total: number } | null>(null);
@@ -929,13 +931,17 @@ export function Products() {
   const openEnhanceProduct = (product: Product) => {
     setEnhanceProduct(product);
     setEnhanceProductScene("studio");
+    setEnhanceProductSceneText("");
   };
 
   const runEnhanceProduct = async () => {
     if (!enhanceProduct) return;
     setEnhanceProductRunning(true);
     try {
-      const res = await api.post(`/products/${enhanceProduct.id}/enhance`, { scene: enhanceProductScene });
+      const res = await api.post(`/products/${enhanceProduct.id}/enhance`, {
+        scene: enhanceProductScene,
+        sceneText: enhanceProductSceneText.trim() || undefined,
+      });
       toast.success("Enhanced image added to this product");
       if (typeof res.data?.remainingCredits === "number") setAiCredits(res.data.remainingCredits);
       setEnhanceProduct(null);
@@ -952,6 +958,7 @@ export function Products() {
 
   const openBulkEnhance = () => {
     setBulkEnhanceScene("studio");
+    setBulkEnhanceSceneText("");
     setBulkEnhanceMode("prepend");
     setBulkEnhanceProgress(null);
     setBulkEnhanceOpen(true);
@@ -973,6 +980,7 @@ export function Products() {
         productIds: ids,
         scene: bulkEnhanceScene,
         mode: bulkEnhanceMode,
+        sceneText: bulkEnhanceSceneText.trim() || undefined,
       });
       const { succeeded, failed, remainingCredits } = res.data as {
         succeeded: { productId: string }[];
@@ -2052,7 +2060,7 @@ export function Products() {
 
             <div className="space-y-2">
               <Label>Background</Label>
-              <Select value={bulkEnhanceScene} onValueChange={setBulkEnhanceScene}>
+              <Select value={bulkEnhanceScene} onValueChange={setBulkEnhanceScene} disabled={!!bulkEnhanceSceneText.trim()}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -2064,6 +2072,26 @@ export function Products() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="bulk-scene-text" className="text-slate-700">Custom theme <span className="text-slate-400 font-normal">(optional)</span></Label>
+                <span className="text-[11px] text-slate-400">{bulkEnhanceSceneText.length}/300</span>
+              </div>
+              <textarea
+                id="bulk-scene-text"
+                value={bulkEnhanceSceneText}
+                onChange={(e) => setBulkEnhanceSceneText(e.target.value.slice(0, 300))}
+                placeholder="e.g. soft pastel pink background with warm morning light"
+                rows={2}
+                className="flex w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-1 resize-none"
+              />
+              <p className="text-[11px] text-slate-500">
+                {bulkEnhanceSceneText.trim()
+                  ? "Using your custom theme — the background preset above is ignored."
+                  : "Leave empty to use the background preset above."}
+              </p>
             </div>
 
             <div className="p-3 bg-slate-50 rounded-md text-sm space-y-1">
@@ -2165,7 +2193,7 @@ export function Products() {
 
               <div className="space-y-2">
                 <Label>Background</Label>
-                <Select value={enhanceProductScene} onValueChange={setEnhanceProductScene}>
+                <Select value={enhanceProductScene} onValueChange={setEnhanceProductScene} disabled={!!enhanceProductSceneText.trim()}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -2177,6 +2205,26 @@ export function Products() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="single-scene-text" className="text-slate-700">Custom theme <span className="text-slate-400 font-normal">(optional)</span></Label>
+                  <span className="text-[11px] text-slate-400">{enhanceProductSceneText.length}/300</span>
+                </div>
+                <textarea
+                  id="single-scene-text"
+                  value={enhanceProductSceneText}
+                  onChange={(e) => setEnhanceProductSceneText(e.target.value.slice(0, 300))}
+                  placeholder="e.g. marble countertop with warm morning sunlight"
+                  rows={2}
+                  className="flex w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-1 resize-none"
+                />
+                <p className="text-[11px] text-slate-500">
+                  {enhanceProductSceneText.trim()
+                    ? "Using your custom theme — the background preset above is ignored."
+                    : "Leave empty to use the background preset above."}
+                </p>
               </div>
 
               <div className="flex items-center justify-between p-3 bg-slate-50 rounded-md text-xs text-slate-600">

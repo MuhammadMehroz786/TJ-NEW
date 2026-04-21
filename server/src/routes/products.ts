@@ -522,6 +522,9 @@ router.post("/:id/enhance", async (req: AuthRequest, res: Response): Promise<voi
   try {
     const sceneInput = typeof req.body?.scene === "string" ? req.body.scene : "studio";
     const scene = backgroundScenes[sceneInput] ? sceneInput : "studio";
+    const sceneText = typeof req.body?.sceneText === "string" && req.body.sceneText.trim()
+      ? req.body.sceneText.trim()
+      : undefined;
 
     const product = await prisma.product.findFirst({
       where: { id: req.params.id as string, userId: req.auth!.userId },
@@ -565,13 +568,14 @@ router.post("/:id/enhance", async (req: AuthRequest, res: Response): Promise<voi
         inputMime: source.mimeType,
         inputBase64: source.base64,
         scene,
+        sceneText,
       });
 
       const saved = await saveEnhancementToLibrary(prisma, {
         userId: req.auth!.userId,
         base64: output.base64,
         mimeType: output.mimeType,
-        background: scene,
+        background: sceneText ? `custom: ${sceneText.slice(0, 80)}` : scene,
         folderName: "Enhanced Products",
       });
 
@@ -644,13 +648,14 @@ const BULK_ENHANCE_MAX_IDS = 50;
 
 router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const body = req.body as { productIds?: unknown; scene?: unknown; mode?: unknown };
+    const body = req.body as { productIds?: unknown; scene?: unknown; mode?: unknown; sceneText?: unknown };
     const ids = Array.isArray(body.productIds)
       ? body.productIds.filter((x): x is string => typeof x === "string" && x.length > 0)
       : [];
     const modeRaw = typeof body.mode === "string" ? body.mode : "prepend";
     const mode: "prepend" | "overwrite" | "new" =
       modeRaw === "overwrite" || modeRaw === "new" ? modeRaw : "prepend";
+    const sceneText = typeof body.sceneText === "string" && body.sceneText.trim() ? body.sceneText.trim() : undefined;
     if (ids.length === 0) {
       res.status(400).json({ error: "productIds array is required", code: "VALIDATION_ERROR" });
       return;
@@ -730,12 +735,13 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
           inputMime: source.mimeType,
           inputBase64: source.base64,
           scene,
+          sceneText,
         });
         const saved = await saveEnhancementToLibrary(prisma, {
           userId: req.auth!.userId,
           base64: output.base64,
           mimeType: output.mimeType,
-          background: scene,
+          background: sceneText ? `custom: ${sceneText.slice(0, 80)}` : scene,
           folderName: "Enhanced Products",
         });
 

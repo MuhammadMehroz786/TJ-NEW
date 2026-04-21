@@ -47,8 +47,24 @@ export class EnhanceError extends Error {
   }
 }
 
-function buildPrompt(sceneName: string): string {
-  const sceneDescription = backgroundScenes[sceneName] || backgroundScenes.studio;
+// Sanitize a merchant-supplied theme description before it's embedded in the
+// Gemini prompt. Blocks prompt-injection attempts (system: roleplay, "ignore
+// previous", markdown/html injection, triple-quote break-outs) and caps length.
+export function sanitizeSceneText(raw: string): string {
+  let s = raw.replace(/[\r\n]+/g, " ");
+  s = s.replace(/[`"']{3,}/g, "");
+  s = s.replace(/<[^>]{0,120}>/g, "");
+  s = s.replace(/\b(?:system|assistant|user)\s*:/gi, "");
+  s = s.replace(/\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above|earlier)/gi, "");
+  s = s.replace(/\s+/g, " ").trim();
+  return s.slice(0, 300);
+}
+
+function buildPrompt(sceneName: string, sceneTextOverride?: string): string {
+  // Merchant-supplied theme (sanitized) wins over the preset's canned
+  // description. Empty string falls back to the preset.
+  const custom = sceneTextOverride ? sanitizeSceneText(sceneTextOverride) : "";
+  const sceneDescription = custom || backgroundScenes[sceneName] || backgroundScenes.studio;
   return `You are a professional e-commerce product photographer. Edit this product image following these strict rules:
 
 PRODUCT PRESERVATION (most important):
@@ -122,6 +138,7 @@ export async function enhanceWithGemini(params: {
   inputMime: string;
   inputBase64: string;
   scene: string;
+  sceneText?: string;   // free-text theme override; wins over the preset when set
 }): Promise<{ mimeType: string; base64: string }> {
   if (!process.env.GEMINI_API_KEY) {
     throw new EnhanceError("GEMINI_API_KEY is not set", 500, "CONFIG_ERROR");
@@ -131,7 +148,7 @@ export async function enhanceWithGemini(params: {
     model: "gemini-2.5-flash-image",
     contents: [
       { inlineData: { mimeType: params.inputMime, data: params.inputBase64 } },
-      buildPrompt(params.scene),
+      buildPrompt(params.scene, params.sceneText),
     ],
     config: { responseModalities: ["image", "text"] },
   });
