@@ -16,7 +16,13 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // Only force-logout when the auth middleware itself rejected the token
+    // (missing / invalid / expired — all tagged with code UNAUTHORIZED). A
+    // plain 401 from a route handler means a semantic failure (e.g. "wrong
+    // current password"), and those must NOT log the user out.
+    const status = error.response?.status;
+    const code = error.response?.data?.code;
+    if (status === 401 && code === "UNAUTHORIZED") {
       localStorage.removeItem("tijarflow_token");
       window.location.href = "/login";
     }

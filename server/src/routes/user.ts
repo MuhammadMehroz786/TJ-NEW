@@ -75,7 +75,11 @@ router.put("/password", async (req: AuthRequest, res: Response): Promise<void> =
 
     const validPassword = await bcrypt.compare(currentPassword, user.password);
     if (!validPassword) {
-      res.status(401).json({ error: "Current password is incorrect", code: "UNAUTHORIZED" });
+      // 403 (not 401) on purpose — the user's session is valid, they just
+      // failed the re-auth challenge. Returning 401 would trip the axios
+      // interceptor's "token expired → redirect to /login" path and drop
+      // them out of the app.
+      res.status(403).json({ error: "Current password is incorrect", code: "WRONG_PASSWORD" });
       return;
     }
 
