@@ -79,8 +79,8 @@ const dict: Dict = {
     ar: "💳 أرصدة الضيف: *{remaining}* من أصل {limit}.\n\nاكتب /start لربط حساب تاجر.",
   },
   credits_verified: {
-    en: "💳 *Your credit balance*\n• Weekly: {weekly} (resets Monday)\n• Purchased: {purchased}\n• Total: {total}",
-    ar: "💳 *رصيد حسابك*\n• الأسبوعي: {weekly} (يتجدد يوم الاثنين)\n• المشترى: {purchased}\n• المجموع: {total}",
+    en: "💳 *Your credit balance*\n• Monthly: {weekly} (resets on the 1st)\n• Purchased: {purchased}\n• Total: {total}",
+    ar: "💳 *رصيد حسابك*\n• الشهري: {weekly} (يتجدد في اليوم الأول من الشهر)\n• المشترى: {purchased}\n• المجموع: {total}",
   },
   credits_fetch_failed: {
     en: "Could not fetch your credit balance. Please try again.",
@@ -159,8 +159,8 @@ const dict: Dict = {
     ar: "✅ أهلاً بعودتك يا {name}! تم ربط حسابك.{creditsInfo}\n\nأرسل صور منتجاتك. بعدها سأسألك عن الثيم المطلوب.",
   },
   credits_info_verified: {
-    en: "\n\n💳 Credits: {weekly} weekly{purchased}.",
-    ar: "\n\n💳 الأرصدة: {weekly} أسبوعي{purchased}.",
+    en: "\n\n💳 Credits: {weekly} monthly{purchased}.",
+    ar: "\n\n💳 الأرصدة: {weekly} شهري{purchased}.",
   },
   credits_info_purchased_suffix: {
     en: " + {purchased} purchased",
@@ -173,12 +173,12 @@ const dict: Dict = {
     ar: "رائع! متبقي لديك *{remaining}* تحسين{plural} مجاني. 🎨\n\nأرسل لي صور منتجاتك — واحدة أو أكثر. بعدها سأسألك عن الثيم المطلوب.",
   },
   guest_trial_exhausted: {
-    en: "You've already used your 5 free enhancements. 🎉\n\nSign up for TijarFlow to get 50 AI credits every week:\n{signup}\n\nOr type /start and pick \"Yes, I'm registered\" to link an existing account.",
-    ar: "لقد استخدمت التحسينات الخمسة المجانية. 🎉\n\nسجّل في تجار فلو للحصول على 50 رصيد ذكاء اصطناعي كل أسبوع:\n{signup}\n\nأو اكتب /start واختر \"نعم، أنا مسجّل\" لربط حساب موجود.",
+    en: "You've already used your 5 free enhancements. 🎉\n\nSign up for TijarFlow to get 30 AI credits every month:\n{signup}\n\nOr type /start and pick \"Yes, I'm registered\" to link an existing account.",
+    ar: "لقد استخدمت التحسينات الخمسة المجانية. 🎉\n\nسجّل في تجار فلو للحصول على 30 رصيد ذكاء اصطناعي كل شهر:\n{signup}\n\nأو اكتب /start واختر \"نعم، أنا مسجّل\" لربط حساب موجود.",
   },
   guest_exhausted_inline: {
-    en: "Your 5 free enhancements are used up! 🎉\n\nSign up for TijarFlow to get 50 AI credits every week:\n{signup}\n\nAlready have an account? Type /start and pick \"Yes, I'm registered\".",
-    ar: "انتهت تحسيناتك المجانية الخمسة! 🎉\n\nسجّل في تجار فلو للحصول على 50 رصيد كل أسبوع:\n{signup}\n\nلديك حساب مسبقاً؟ اكتب /start واختر \"نعم، أنا مسجّل\".",
+    en: "Your 5 free enhancements are used up! 🎉\n\nSign up for TijarFlow to get 30 AI credits every month:\n{signup}\n\nAlready have an account? Type /start and pick \"Yes, I'm registered\".",
+    ar: "انتهت تحسيناتك المجانية الخمسة! 🎉\n\nسجّل في تجار فلو للحصول على 30 رصيد كل شهر:\n{signup}\n\nلديك حساب مسبقاً؟ اكتب /start واختر \"نعم، أنا مسجّل\".",
   },
   guest_remaining_hint: {
     en: "You have *{remaining}* free enhancement{plural} remaining.\n\nSend a product image to use one! 📸",
@@ -229,8 +229,8 @@ const dict: Dict = {
     ar: "الصورة {i} من {total}",
   },
   credits_exhausted_weekly: {
-    en: "⚠️ You've used all your AI credits for this week. They reset every Monday.\n\nVisit {signup} to purchase more credits.",
-    ar: "⚠️ استخدمت كل أرصدة هذا الأسبوع. يتجدد الرصيد يوم الاثنين.\n\nزر {signup} لشراء المزيد.",
+    en: "⚠️ You've used all your AI credits for this month. They reset on the 1st of each month.\n\nVisit {signup} to purchase more credits.",
+    ar: "⚠️ استخدمت كل أرصدة هذا الشهر. يتجدد الرصيد في اليوم الأول من الشهر.\n\nزر {signup} لشراء المزيد.",
   },
 
   // ── Summary footers after batch ────────────────────────────────────────────
@@ -239,8 +239,8 @@ const dict: Dict = {
   summary_skipped: { en: "⏭️ {n} skipped (no credits)", ar: "⏭️ {n} تم تخطيها (لا رصيد)" },
   summary_done_fallback: { en: "Done", ar: "تم" },
   summary_footer_verified: {
-    en: "\n\n💳 Credits left: {weekly} weekly{purchased}.\n\n💡 *Reply* to any image above to refine just that one, or type /new to start over.",
-    ar: "\n\n💳 الرصيد المتبقي: {weekly} أسبوعي{purchased}.\n\n💡 *ردّ* على أي صورة لتحسينها فقط، أو اكتب /new للبدء من جديد.",
+    en: "\n\n💳 Credits left: {weekly} monthly{purchased}.\n\n💡 *Reply* to any image above to refine just that one, or type /new to start over.",
+    ar: "\n\n💳 الرصيد المتبقي: {weekly} شهري{purchased}.\n\n💡 *ردّ* على أي صورة لتحسينها فقط، أو اكتب /new للبدء من جديد.",
   },
   summary_footer_guest: {
     en: "\n\n💳 Free enhancements left: {remaining}.\n\n💡 *Reply* to any image above to refine just that one, or type /new to start over.",
@@ -265,8 +265,8 @@ const dict: Dict = {
     ar: "عذراً، لم أستطع تطبيق التعديل. أعد صياغته أو أرسل صورة جديدة.",
   },
   refine_applied_verified: {
-    en: "✅ Refinement applied. Credits remaining: {weekly} weekly{purchased}.",
-    ar: "✅ تم تطبيق التعديل. الرصيد المتبقي: {weekly} أسبوعي{purchased}.",
+    en: "✅ Refinement applied. Credits remaining: {weekly} monthly{purchased}.",
+    ar: "✅ تم تطبيق التعديل. الرصيد المتبقي: {weekly} شهري{purchased}.",
   },
   refine_applied_guest: {
     en: "✅ Refinement applied. *{remaining}* free enhancement{plural} remaining.",

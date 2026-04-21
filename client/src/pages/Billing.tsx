@@ -52,7 +52,7 @@ function daysUntil(iso: string) {
   return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
 }
 
-const WEEKLY_MAX = 50;
+const WEEKLY_MAX = 30;
 const CUSTOM_PRICE_PER_CREDIT = 0.1;
 
 const statusConfig: Record<CreditPurchase["status"], { label: string; bg: string; text: string }> = {
@@ -284,7 +284,7 @@ export function Billing() {
               <span className="text-base font-normal ml-2" style={{ color: "#94A3B8" }}>Cr.</span>
             </p>
             <p className="text-xs mt-2" style={{ color: "#94A3B8" }}>
-              Weekly &gt; last Local confirmed
+              Monthly &gt; last Local confirmed
             </p>
           </div>
 
@@ -325,7 +325,7 @@ export function Billing() {
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
             <p className="text-xs font-semibold text-amber-800 mb-1">How credits work</p>
             <p className="text-xs text-amber-700 leading-relaxed">
-              50 free weekly credits reset every Monday. Purchased credits activate when weekly ones run out and never expire.
+              30 free monthly credits reset on the 1st of each month. Purchased credits activate when monthly ones run out and never expire.
             </p>
           </div>
         </div>

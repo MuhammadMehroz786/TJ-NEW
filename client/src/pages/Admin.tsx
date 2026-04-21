@@ -619,7 +619,7 @@ export function Admin() {
                     </SelectContent>
                   </Select>
                   <div className="flex-1 flex items-center gap-4 text-sm">
-                    <span><Wallet className="h-3.5 w-3.5 inline mr-1 text-slate-400" /> Weekly: <span className="font-semibold">{detail.user.aiCredits}</span></span>
+                    <span><Wallet className="h-3.5 w-3.5 inline mr-1 text-slate-400" /> Monthly: <span className="font-semibold">{detail.user.aiCredits}</span></span>
                     <span>Purchased: <span className="font-semibold">{detail.user.purchasedCredits}</span></span>
                   </div>
                 </div>

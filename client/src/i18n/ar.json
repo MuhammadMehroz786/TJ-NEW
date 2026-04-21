@@ -127,7 +127,7 @@
     "itemsCount": "{{count}} عنصر في كل الصور",
     "itemsCount_one": "{{count}} عنصر في كل الصور",
     "credits": "{{count}} رصيد",
-    "creditsBreakdown": "({{weekly}} أسبوعي + {{purchased}} مشترى)",
+    "creditsBreakdown": "({{weekly}} شهري + {{purchased}} مشترى)",
     "buyCredits": "شراء أرصدة",
     "folders": "المجلدات",
     "newFolder": "مجلد جديد",
@@ -157,7 +157,7 @@
   "billing": {
     "title": "الأرصدة والفواتير",
     "subtitle": "أدر أرصدة الذكاء الاصطناعي وسجلّ المشتريات",
-    "weekly": "أسبوعي",
+    "weekly": "شهري",
     "purchased": "مشترى",
     "total": "الإجمالي المتاح",
     "resetIn": "يتجدد خلال {{days}} يوم",

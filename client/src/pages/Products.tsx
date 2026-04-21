@@ -968,11 +968,11 @@ export function Products() {
           <h1 className="text-2xl font-semibold text-slate-900">{t("products.title")}</h1>
           <p className="text-slate-500 text-sm mt-1">{total} · {t("products.subtitle")}</p>
           <p className={`text-sm mt-1 font-medium ${creditClassName}`}>
-            AI Credits: {aiCredits ?? "—"} / 50 (resets every Monday)
+            AI Credits: {aiCredits ?? "—"} / 30 (resets on the 1st of each month)
           </p>
           {aiCredits !== null && aiCredits <= 0 && (
             <p className="text-xs text-red-600 mt-1">
-              You have exhausted your weekly AI credits. Credits will reset on Monday.
+              You have exhausted your monthly AI credits. Credits will reset on the 1st of next month.
             </p>
           )}
         </div>
@@ -1331,7 +1331,7 @@ export function Products() {
                     <span className="text-xs font-semibold text-teal-800">AI Enhancement</span>
                   </div>
                   <span className={`text-xs font-medium ${creditClassName}`}>
-                    {aiCredits ?? "—"} / 50 credits
+                    {aiCredits ?? "—"} / 30 credits
                   </span>
                 </div>
                 <div className="flex gap-2">
@@ -1369,7 +1369,7 @@ export function Products() {
                   <p className="text-[11px] text-slate-400 italic">Upload images from your device to enable enhancement</p>
                 )}
                 {aiCredits !== null && aiCredits <= 0 && (
-                  <p className="text-[11px] text-red-500">No credits remaining. Resets every Monday.</p>
+                  <p className="text-[11px] text-red-500">No credits remaining. Resets on the 1st of each month.</p>
                 )}
               </div>
             )}

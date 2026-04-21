@@ -43,8 +43,8 @@ function calculatePrice(credits: number): number {
 router.get("/balance", authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const balance = await getAICredits(prisma, req.auth!.userId);
-    const nextMonday = getNextMondayUTC();
-    res.json({ ...balance, nextResetAt: nextMonday.toISOString() });
+    const nextReset = getNextMonthStartUTC();
+    res.json({ ...balance, nextResetAt: nextReset.toISOString() });
   } catch {
     res.status(500).json({ error: "Failed to load credit balance", code: "INTERNAL_ERROR" });
   }
@@ -358,12 +358,11 @@ router.get("/usage", authenticate, async (req: AuthRequest, res: Response): Prom
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-function getNextMondayUTC(): Date {
+// First day of the next calendar month at 00:00 UTC. Used to tell the client
+// when the monthly free-credits pool will refresh.
+function getNextMonthStartUTC(): Date {
   const now = new Date();
-  const day = now.getUTCDay();
-  const daysUntilMonday = day === 0 ? 1 : 8 - day;
-  const nextMonday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday));
-  return nextMonday;
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 }
 
 export default router;

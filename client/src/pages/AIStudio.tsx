@@ -325,7 +325,7 @@ export function AIStudio() {
             <span>{aiCredits ?? "—"} credits</span>
             {weeklyCredits !== null && purchasedCredits !== null && (
               <span className="text-xs opacity-70">
-                ({weeklyCredits} weekly + {purchasedCredits} purchased)
+                ({weeklyCredits} monthly + {purchasedCredits} purchased)
               </span>
             )}
           </div>
@@ -341,7 +341,7 @@ export function AIStudio() {
       {aiCredits !== null && aiCredits <= 0 && (
         <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
           <span className="font-medium">Credits exhausted.</span>
-          <span>Your weekly credits reset Monday, or </span>
+          <span>Your monthly credits reset on the 1st, or </span>
           <button onClick={() => navigate("/billing")} className="underline font-medium">buy more now</button>.
         </div>
       )}

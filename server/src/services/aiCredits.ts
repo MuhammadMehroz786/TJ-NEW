@@ -1,28 +1,36 @@
 import { PrismaClient } from "@prisma/client";
 
-export const WEEKLY_AI_CREDITS = 50;
+// 30 free AI credits per calendar month. Purchased credits are separate and
+// never expire — they kick in once the monthly pool is drained.
+export const WEEKLY_AI_CREDITS = 30;
+export const MONTHLY_AI_CREDITS = 30;
 
-function getMondayKeyUTC(date = new Date()): string {
-  const utcDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const day = utcDate.getUTCDay(); // 0=Sun, 1=Mon
-  const diffToMonday = (day + 6) % 7;
-  utcDate.setUTCDate(utcDate.getUTCDate() - diffToMonday);
-  return utcDate.toISOString().slice(0, 10);
+// Returns "YYYY-MM" for the current calendar month in UTC. We keep the DB
+// column named `aiCreditsWeekKey` for backward-compatibility with migrations,
+// but it now stores a month key. The value comparison is still a simple
+// string-equality check, so the rename is purely cosmetic.
+function getMonthKeyUTC(date = new Date()): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 export class AICreditError extends Error {
   code = "AI_CREDITS_EXHAUSTED";
   status = 403;
-  constructor(message = "AI credits exhausted. Purchase more credits or wait for your weekly reset on Monday.") {
+  constructor(message = "AI credits exhausted. Purchase more credits or wait for your monthly reset on the 1st.") {
     super(message);
   }
 }
 
 /**
  * Consume 1 credit with priority drain:
- *   1. Weekly free credits (aiCredits) drain first
- *   2. Purchased credits (purchasedCredits) drain after weekly is 0
- * Weekly credits auto-reset to 50 on a new week — purchased credits are NEVER reset.
+ *   1. Free monthly credits (aiCredits) drain first
+ *   2. Purchased credits (purchasedCredits) drain after monthly is 0
+ * Monthly credits auto-reset to 30 on the 1st of each month — purchased
+ * credits are NEVER reset.
+ *
+ * Note: the DB column is named `aiCreditsWeekKey` for historical reasons,
+ * and the return field is `weeklyCredits` — both really hold monthly state
+ * now. Callers haven't been renamed to avoid churning every feature.
  */
 export type CreditPool = "weekly" | "purchased";
 
@@ -30,7 +38,7 @@ export async function consumeWeeklyAICredit(
   prisma: PrismaClient,
   userId: string
 ): Promise<{ weeklyCredits: number; purchasedCredits: number; totalCredits: number; resetWeek: string; usedPool: CreditPool }> {
-  const currentWeekKey = getMondayKeyUTC();
+  const currentWeekKey = getMonthKeyUTC();
 
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({
@@ -121,7 +129,7 @@ export async function getAICredits(
   prisma: PrismaClient,
   userId: string
 ): Promise<{ weeklyCredits: number; purchasedCredits: number; totalCredits: number; resetWeek: string }> {
-  const currentWeekKey = getMondayKeyUTC();
+  const currentWeekKey = getMonthKeyUTC();
 
   return prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({

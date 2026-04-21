@@ -127,7 +127,7 @@
     "itemsCount": "{{count}} items in All Images",
     "itemsCount_one": "{{count}} item in All Images",
     "credits": "{{count}} credits",
-    "creditsBreakdown": "({{weekly}} weekly + {{purchased}} purchased)",
+    "creditsBreakdown": "({{weekly}} monthly + {{purchased}} purchased)",
     "buyCredits": "Buy Credits",
     "folders": "Folders",
     "newFolder": "New folder",
@@ -157,7 +157,7 @@
   "billing": {
     "title": "Credits & Billing",
     "subtitle": "Manage your AI credits and purchase history",
-    "weekly": "Weekly",
+    "weekly": "Monthly",
     "purchased": "Purchased",
     "total": "Total Available",
     "resetIn": "Reset in {{days}} days",
