@@ -25,7 +25,6 @@ import campaignRoutes from "./routes/campaigns";
 import promoCodeRoutes from "./routes/promoCodes";
 import affiliateLinkRoutes from "./routes/affiliateLinks";
 import manualSaleRoutes from "./routes/manualSales";
-<<<<<<< HEAD
 import marketplaceProductRoutes from "./routes/marketplace";
 import aiStudioRoutes from "./routes/aiStudio";
 import whatsappRoutes from "./routes/whatsapp";
@@ -33,10 +32,6 @@ import creditsRoutes from "./routes/credits";
 import sallaRoutes from "./routes/salla";
 import adminRoutes from "./routes/admin";
 import { PrismaClient } from "@prisma/client";
-=======
-
-dotenv.config();
->>>>>>> 865deab (feat: add promo codes, affiliate links, click tracking, and manual sales)
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -103,7 +98,6 @@ app.use("/api/campaigns", campaignRoutes);
 app.use("/api/promo-codes", promoCodeRoutes);
 app.use("/api/affiliate-links", affiliateLinkRoutes);
 app.use("/api/manual-sales", manualSaleRoutes);
-<<<<<<< HEAD
 app.use("/api/marketplace", marketplaceProductRoutes);
 app.use("/api/ai-studio", aiLimiter, aiStudioRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
@@ -114,8 +108,6 @@ app.use("/api/credits/checkout", checkoutLimiter);
 app.use("/api/credits", creditsRoutes);
 app.use("/api/salla", sallaRoutes);
 app.use("/api/admin", adminRoutes);
-=======
->>>>>>> 865deab (feat: add promo codes, affiliate links, click tracking, and manual sales)
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });

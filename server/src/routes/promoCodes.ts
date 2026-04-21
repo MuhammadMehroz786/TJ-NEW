@@ -64,6 +64,16 @@ router.put("/:id", authenticate, requireRole("MERCHANT"), async (req: AuthReques
 
     const { code, description, discount, isActive } = req.body;
 
+    if (code) {
+      const conflict = await prisma.promoCode.findUnique({
+        where: { merchantId_code: { merchantId: req.auth!.userId, code: code.toUpperCase() } },
+      });
+      if (conflict && conflict.id !== req.params.id) {
+        res.status(409).json({ error: "Promo code already exists", code: "CONFLICT" });
+        return;
+      }
+    }
+
     const promoCode = await prisma.promoCode.update({
       where: { id: req.params.id },
       data: {
