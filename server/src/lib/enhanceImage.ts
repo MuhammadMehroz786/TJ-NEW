@@ -112,6 +112,31 @@ export async function fetchRemoteImage(url: string): Promise<{ mimeType: string;
 }
 
 /**
+ * Decode a data: URI into bytes + validated mime. Used when a product's
+ * first image was pasted/uploaded directly into the images[] array as a
+ * base64 data URI instead of being uploaded to /media/ — legacy products
+ * and manual form entries are common sources.
+ */
+export function decodeDataUri(input: string): { mimeType: string; base64: string } {
+  const match = input.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new EnhanceError("Source image isn't a valid data URI", 400, "INVALID_IMAGE");
+  const base64 = match[2];
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(base64, "base64");
+  } catch {
+    throw new EnhanceError("Source image data is not valid base64", 400, "INVALID_IMAGE");
+  }
+  if (buf.length === 0) throw new EnhanceError("Source image is empty", 400, "INVALID_IMAGE");
+  if (buf.length > MAX_IMAGE_BYTES) throw new EnhanceError("Source image is too large", 400, "INVALID_IMAGE");
+  // Trust the bytes, not the data URI's claimed mime — same defense we use
+  // when merchants upload through AI Studio.
+  const mime = detectImageMime(buf);
+  if (!mime) throw new EnhanceError("Source image format isn't supported", 400, "INVALID_IMAGE");
+  return { mimeType: mime, base64: buf.toString("base64") };
+}
+
+/**
  * Read a /media/ relative path off local disk and return its bytes + mime. Used
  * when the product's first image is one we already hosted (e.g. from a prior
  * AI Studio enhancement).

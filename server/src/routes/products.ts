@@ -17,7 +17,7 @@ import { tijarflowProductToShopify } from "../services/shopifyMapper";
 import { SallaService, SallaAuthError, SallaApiError } from "../services/salla";
 import { tijarflowProductToSalla } from "../services/sallaMapper";
 import { signMediaPath, MEDIA_TTL_SHORT, MEDIA_TTL_MARKETPLACE } from "../lib/mediaSign";
-import { enhanceWithGemini, fetchRemoteImage, readLocalMedia, backgroundScenes, EnhanceError } from "../lib/enhanceImage";
+import { enhanceWithGemini, fetchRemoteImage, readLocalMedia, decodeDataUri, backgroundScenes, EnhanceError } from "../lib/enhanceImage";
 import { saveEnhancementToLibrary } from "../lib/imageStorage";
 import { AICreditError, consumeWeeklyAICredit, refundOneCredit } from "../services/aiCredits";
 
@@ -541,12 +541,15 @@ router.post("/:id/enhance", async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    // Pull source bytes — either local /media/... or a remote CDN URL.
+    // Pull source bytes — local /media/..., remote CDN URL, or an inline
+    // base64 data URI (legacy products often store images this way).
     let source: { mimeType: string; base64: string };
     try {
       if (sourceUrl.startsWith("/media/")) {
         const rel = sourceUrl.slice("/media/".length).split("?")[0];
         source = await readLocalMedia(rel);
+      } else if (sourceUrl.startsWith("data:")) {
+        source = decodeDataUri(sourceUrl);
       } else if (/^https?:\/\//i.test(sourceUrl)) {
         source = await fetchRemoteImage(sourceUrl);
       } else {
@@ -709,6 +712,8 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
         if (sourceUrl.startsWith("/media/")) {
           const rel = sourceUrl.slice("/media/".length).split("?")[0];
           source = await readLocalMedia(rel);
+        } else if (sourceUrl.startsWith("data:")) {
+          source = decodeDataUri(sourceUrl);
         } else if (/^https?:\/\//i.test(sourceUrl)) {
           source = await fetchRemoteImage(sourceUrl);
         } else {
