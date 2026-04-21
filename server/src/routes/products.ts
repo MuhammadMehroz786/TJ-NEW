@@ -615,6 +615,173 @@ router.post("/:id/enhance", async (req: AuthRequest, res: Response): Promise<voi
   }
 });
 
+// POST /api/products/bulk-enhance — run AI Studio enhancement on the first
+// image of many products in one call. Same per-product logic as the single
+// /:id/enhance endpoint, but fans out with a concurrency cap so a batch of 50
+// doesn't hit Gemini's rate limit or blow up server memory.
+//
+// Body: { productIds: string[], scene?: string }
+// Response: {
+//   succeeded: { productId, enhancedImageUrl }[],
+//   failed:    { productId, error }[],
+//   remainingCredits: number,
+// }
+const BULK_ENHANCE_CONCURRENCY = 3;
+const BULK_ENHANCE_MAX_IDS = 50;
+
+router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const body = req.body as { productIds?: unknown; scene?: unknown };
+    const ids = Array.isArray(body.productIds)
+      ? body.productIds.filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [];
+    if (ids.length === 0) {
+      res.status(400).json({ error: "productIds array is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (ids.length > BULK_ENHANCE_MAX_IDS) {
+      res.status(400).json({
+        error: `Too many products. Max ${BULK_ENHANCE_MAX_IDS} per batch — select fewer and try again.`,
+        code: "TOO_MANY_PRODUCTS",
+      });
+      return;
+    }
+
+    const sceneInput = typeof body.scene === "string" ? body.scene : "studio";
+    const scene = backgroundScenes[sceneInput] ? sceneInput : "studio";
+
+    // Fetch all products once (owner-scoped). We'll dispatch per-product
+    // enhancement in parallel with a concurrency cap — failures don't stop
+    // the rest, and credits are consumed/refunded per-product.
+    const products = await prisma.product.findMany({
+      where: { id: { in: ids }, userId: req.auth!.userId },
+      select: { id: true, images: true },
+    });
+    const foundMap = new Map(products.map((p) => [p.id, p]));
+
+    const succeeded: { productId: string; enhancedImageUrl: string }[] = [];
+    const failed: { productId: string; error: string }[] = [];
+    let lastRemainingCredits: number | null = null;
+
+    // Small helper: process one product, mirrors the single-enhance flow
+    const enhanceOne = async (productId: string): Promise<void> => {
+      const product = foundMap.get(productId);
+      if (!product) {
+        failed.push({ productId, error: "Product not found" });
+        return;
+      }
+      const images = Array.isArray(product.images) ? (product.images as string[]) : [];
+      const sourceUrl = images.find((u) => typeof u === "string" && u.length > 0);
+      if (!sourceUrl) {
+        failed.push({ productId, error: "No source image" });
+        return;
+      }
+
+      let source: { mimeType: string; base64: string };
+      try {
+        if (sourceUrl.startsWith("/media/")) {
+          const rel = sourceUrl.slice("/media/".length).split("?")[0];
+          source = await readLocalMedia(rel);
+        } else if (/^https?:\/\//i.test(sourceUrl)) {
+          source = await fetchRemoteImage(sourceUrl);
+        } else {
+          failed.push({ productId, error: "Unsupported image source" });
+          return;
+        }
+      } catch (err) {
+        failed.push({ productId, error: err instanceof EnhanceError ? err.message : "Couldn't load source image" });
+        return;
+      }
+
+      let creditUsage;
+      try {
+        creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
+      } catch (err) {
+        // Credits exhausted partway through the batch — stop trying to
+        // consume more (everyone after this gets the same error).
+        failed.push({ productId, error: err instanceof AICreditError ? err.message : "Credit check failed" });
+        throw err; // rethrow so the pool short-circuits
+      }
+
+      try {
+        const output = await enhanceWithGemini({
+          inputMime: source.mimeType,
+          inputBase64: source.base64,
+          scene,
+        });
+        const saved = await saveEnhancementToLibrary(prisma, {
+          userId: req.auth!.userId,
+          base64: output.base64,
+          mimeType: output.mimeType,
+          background: scene,
+          folderName: "Enhanced Products",
+        });
+        await prisma.product.update({
+          where: { id: product.id },
+          data: { images: [saved.imageUrl, ...images] },
+        });
+        succeeded.push({
+          productId: product.id,
+          enhancedImageUrl: signMediaPath(saved.imagePath, MEDIA_TTL_SHORT),
+        });
+        lastRemainingCredits = creditUsage.totalCredits;
+      } catch (innerErr: any) {
+        await refundOneCredit(prisma, req.auth!.userId, creditUsage.usedPool);
+        const message = innerErr?.message || "Enhancement failed";
+        failed.push({
+          productId: product.id,
+          error: /Unable to process input image|INVALID_ARGUMENT|input image/i.test(message)
+            ? "Gemini rejected the source image"
+            : "Enhancement failed",
+        });
+      }
+    };
+
+    // Dispatch with a concurrency cap. Each worker pulls the next id until
+    // the queue is empty. If credits run out, remaining ids get marked failed.
+    const queue = [...ids];
+    let creditsExhausted = false;
+    const worker = async (): Promise<void> => {
+      while (queue.length > 0) {
+        if (creditsExhausted) {
+          const id = queue.shift()!;
+          failed.push({ productId: id, error: "Credits exhausted" });
+          continue;
+        }
+        const id = queue.shift()!;
+        try {
+          await enhanceOne(id);
+        } catch (err) {
+          if (err instanceof AICreditError) creditsExhausted = true;
+        }
+      }
+    };
+    const workers = Array.from({ length: Math.min(BULK_ENHANCE_CONCURRENCY, ids.length) }, () => worker());
+    await Promise.all(workers);
+
+    // If we never managed to call enhanceOne successfully, we don't have a
+    // fresh credit count — read it back cheaply.
+    if (lastRemainingCredits === null) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.auth!.userId },
+        select: { aiCredits: true, purchasedCredits: true },
+      });
+      lastRemainingCredits = (user?.aiCredits ?? 0) + (user?.purchasedCredits ?? 0);
+    }
+
+    res.json({
+      succeeded,
+      failed,
+      remainingCredits: lastRemainingCredits,
+      total: ids.length,
+      scene,
+    });
+  } catch (err) {
+    console.error("Bulk enhance error:", err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  }
+});
+
 // POST /api/products/push — push products to a marketplace
 router.post("/push", async (req: AuthRequest, res: Response): Promise<void> => {
   try {

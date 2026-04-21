@@ -524,6 +524,12 @@ export function Products() {
   const [enhanceProductScene, setEnhanceProductScene] = useState("studio");
   const [enhanceProductRunning, setEnhanceProductRunning] = useState(false);
 
+  // Bulk enhance (multiple products at once) state
+  const [bulkEnhanceOpen, setBulkEnhanceOpen] = useState(false);
+  const [bulkEnhanceScene, setBulkEnhanceScene] = useState("studio");
+  const [bulkEnhanceRunning, setBulkEnhanceRunning] = useState(false);
+  const [bulkEnhanceProgress, setBulkEnhanceProgress] = useState<{ done: number; total: number } | null>(null);
+
   // Advertise state
   const [advertiseProduct, setAdvertiseProduct] = useState<Product | null>(null);
   const [creators, setCreators] = useState<any[]>([]);
@@ -943,6 +949,56 @@ export function Products() {
     }
   };
 
+  const openBulkEnhance = () => {
+    setBulkEnhanceScene("studio");
+    setBulkEnhanceProgress(null);
+    setBulkEnhanceOpen(true);
+  };
+
+  const runBulkEnhance = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkEnhanceRunning(true);
+    setBulkEnhanceProgress({ done: 0, total: ids.length });
+    // The endpoint runs server-side with concurrency internally, so the
+    // progress bar here is a simple "submitting..." indicator until the
+    // final counts come back. For a better UX we'd stream progress (SSE),
+    // but a one-shot request keeps the contract simple and matches the
+    // single-enhance endpoint.
+    const toastId = toast.loading(`Enhancing ${ids.length} product(s)... This may take a few minutes.`);
+    try {
+      const res = await api.post("/products/bulk-enhance", { productIds: ids, scene: bulkEnhanceScene });
+      const { succeeded, failed, remainingCredits } = res.data as {
+        succeeded: { productId: string }[];
+        failed: { productId: string; error: string }[];
+        remainingCredits: number;
+      };
+      toast.dismiss(toastId);
+      if (typeof remainingCredits === "number") setAiCredits(remainingCredits);
+      if (failed.length === 0) {
+        toast.success(`Enhanced ${succeeded.length} product(s)`);
+      } else if (succeeded.length === 0) {
+        toast.error(`All ${failed.length} enhancement(s) failed — see console for details`);
+        console.error("Bulk enhance failures:", failed);
+      } else {
+        toast.warning(`Enhanced ${succeeded.length} · ${failed.length} failed — see console for details`);
+        console.warn("Bulk enhance partial failures:", failed);
+      }
+      setBulkEnhanceOpen(false);
+      setSelectedIds(new Set());
+      fetchProducts();
+    } catch (err: unknown) {
+      toast.dismiss(toastId);
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        "Bulk enhancement failed";
+      toast.error(message);
+    } finally {
+      setBulkEnhanceRunning(false);
+      setBulkEnhanceProgress(null);
+    }
+  };
+
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -1045,6 +1101,17 @@ export function Products() {
               onClick={() => handleBulkAction("delete")}
             >
               Delete
+            </Button>
+            <div className="h-5 w-px bg-teal-200 mx-1" />
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-amber-700 border-amber-200 bg-white hover:bg-amber-50"
+              onClick={openBulkEnhance}
+              disabled={bulkEnhanceRunning || selectedIds.size > 50}
+            >
+              <Sparkles className="h-3.5 w-3.5 mr-1.5 text-amber-500" />
+              Enhance with AI ({selectedIds.size})
             </Button>
             {connections.length > 0 && (
               <div className="h-5 w-px bg-teal-200 mx-1" />
@@ -1898,6 +1965,105 @@ export function Products() {
                   </>
                 ) : (
                   `Import ${importRows.length || ""} product${importRows.length === 1 ? "" : "s"}`
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Enhance Dialog */}
+      <Dialog
+        open={bulkEnhanceOpen}
+        onOpenChange={(open) => { if (!open && !bulkEnhanceRunning) setBulkEnhanceOpen(false); }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-amber-500" />
+              Enhance {selectedIds.size} product{selectedIds.size === 1 ? "" : "s"} with AI
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              The first image of each selected product will be enhanced with the chosen background.
+              Products without an image are skipped. Results are also saved to your AI Studio library.
+            </p>
+
+            <div className="space-y-2">
+              <Label>Background</Label>
+              <Select value={bulkEnhanceScene} onValueChange={setBulkEnhanceScene}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {backgroundOptions.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-md text-sm space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Credit cost</span>
+                <span className="font-medium text-slate-900">
+                  {selectedIds.size} credit{selectedIds.size === 1 ? "" : "s"} (1 per product)
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-600">Credits available</span>
+                <span className={creditClassName + " font-medium"}>
+                  {aiCredits ?? "—"}
+                </span>
+              </div>
+              {aiCredits !== null && aiCredits < selectedIds.size && (
+                <p className="text-xs text-amber-700 pt-1">
+                  Not enough credits for all {selectedIds.size} — the first {aiCredits} will be enhanced, the rest skipped.
+                </p>
+              )}
+            </div>
+
+            {bulkEnhanceProgress && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-slate-600">
+                  <span>Processing...</span>
+                  <span>{bulkEnhanceProgress.done} / {bulkEnhanceProgress.total}</span>
+                </div>
+                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-amber-500 transition-all"
+                    style={{ width: `${Math.min(100, (bulkEnhanceProgress.done / Math.max(1, bulkEnhanceProgress.total)) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setBulkEnhanceOpen(false)}
+                disabled={bulkEnhanceRunning}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="bg-teal-600 hover:bg-teal-700 text-white"
+                onClick={runBulkEnhance}
+                disabled={bulkEnhanceRunning || selectedIds.size === 0 || (aiCredits !== null && aiCredits <= 0)}
+              >
+                {bulkEnhanceRunning ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Enhancing...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Enhance {selectedIds.size}
+                  </>
                 )}
               </Button>
             </div>
