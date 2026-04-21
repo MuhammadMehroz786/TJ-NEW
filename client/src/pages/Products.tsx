@@ -527,6 +527,7 @@ export function Products() {
   // Bulk enhance (multiple products at once) state
   const [bulkEnhanceOpen, setBulkEnhanceOpen] = useState(false);
   const [bulkEnhanceScene, setBulkEnhanceScene] = useState("studio");
+  const [bulkEnhanceMode, setBulkEnhanceMode] = useState<"prepend" | "overwrite" | "new">("prepend");
   const [bulkEnhanceRunning, setBulkEnhanceRunning] = useState(false);
   const [bulkEnhanceProgress, setBulkEnhanceProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -951,6 +952,7 @@ export function Products() {
 
   const openBulkEnhance = () => {
     setBulkEnhanceScene("studio");
+    setBulkEnhanceMode("prepend");
     setBulkEnhanceProgress(null);
     setBulkEnhanceOpen(true);
   };
@@ -967,7 +969,11 @@ export function Products() {
     // single-enhance endpoint.
     const toastId = toast.loading(`Enhancing ${ids.length} product(s)... This may take a few minutes.`);
     try {
-      const res = await api.post("/products/bulk-enhance", { productIds: ids, scene: bulkEnhanceScene });
+      const res = await api.post("/products/bulk-enhance", {
+        productIds: ids,
+        scene: bulkEnhanceScene,
+        mode: bulkEnhanceMode,
+      });
       const { succeeded, failed, remainingCredits } = res.data as {
         succeeded: { productId: string }[];
         failed: { productId: string; error: string }[];
@@ -1989,6 +1995,60 @@ export function Products() {
               The first image of each selected product will be enhanced with the chosen background.
               Products without an image are skipped. Results are also saved to your AI Studio library.
             </p>
+
+            <div className="space-y-2">
+              <Label>Output</Label>
+              <div className="space-y-1.5">
+                <label className={`flex items-start gap-2 p-2.5 rounded-md border cursor-pointer transition-colors ${
+                  bulkEnhanceMode === "prepend" ? "border-teal-400 bg-teal-50/60" : "border-slate-200 hover:bg-slate-50"
+                }`}>
+                  <input
+                    type="radio"
+                    name="bulk-enhance-mode"
+                    value="prepend"
+                    checked={bulkEnhanceMode === "prepend"}
+                    onChange={() => setBulkEnhanceMode("prepend")}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-slate-800">Add enhanced image (keep originals)</p>
+                    <p className="text-xs text-slate-500">The new image is added in front; your old images are kept.</p>
+                  </div>
+                </label>
+                <label className={`flex items-start gap-2 p-2.5 rounded-md border cursor-pointer transition-colors ${
+                  bulkEnhanceMode === "overwrite" ? "border-teal-400 bg-teal-50/60" : "border-slate-200 hover:bg-slate-50"
+                }`}>
+                  <input
+                    type="radio"
+                    name="bulk-enhance-mode"
+                    value="overwrite"
+                    checked={bulkEnhanceMode === "overwrite"}
+                    onChange={() => setBulkEnhanceMode("overwrite")}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-slate-800">Overwrite existing images</p>
+                    <p className="text-xs text-slate-500">Replaces each product's images with just the enhanced one. Can't be undone.</p>
+                  </div>
+                </label>
+                <label className={`flex items-start gap-2 p-2.5 rounded-md border cursor-pointer transition-colors ${
+                  bulkEnhanceMode === "new" ? "border-teal-400 bg-teal-50/60" : "border-slate-200 hover:bg-slate-50"
+                }`}>
+                  <input
+                    type="radio"
+                    name="bulk-enhance-mode"
+                    value="new"
+                    checked={bulkEnhanceMode === "new"}
+                    onChange={() => setBulkEnhanceMode("new")}
+                    className="mt-0.5"
+                  />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-slate-800">Save as new products (tagged AI)</p>
+                    <p className="text-xs text-slate-500">Creates new draft products with "(AI)" in the title and an "ai-enhanced" tag. Originals untouched.</p>
+                  </div>
+                </label>
+              </div>
+            </div>
 
             <div className="space-y-2">
               <Label>Background</Label>

@@ -620,9 +620,22 @@ router.post("/:id/enhance", async (req: AuthRequest, res: Response): Promise<voi
 // /:id/enhance endpoint, but fans out with a concurrency cap so a batch of 50
 // doesn't hit Gemini's rate limit or blow up server memory.
 //
-// Body: { productIds: string[], scene?: string }
+// Body: {
+//   productIds: string[],
+//   scene?: string,
+//   mode?: "prepend" | "overwrite" | "new"   // default: prepend
+// }
+//   - prepend:   the enhanced image is added in front of the product's
+//                existing images[], keeping the old ones (default, safe)
+//   - overwrite: the product's images[] is replaced with just the new one
+//                — the old images are no longer attached to the product
+//   - new:       leave the original product untouched; create a fresh
+//                product that copies every field except images/sku/platform
+//                IDs, appends "(AI)" to the title, and adds an "ai-enhanced"
+//                tag so the merchant can filter for them
+//
 // Response: {
-//   succeeded: { productId, enhancedImageUrl }[],
+//   succeeded: { productId, enhancedImageUrl, newProductId? }[],
 //   failed:    { productId, error }[],
 //   remainingCredits: number,
 // }
@@ -631,10 +644,13 @@ const BULK_ENHANCE_MAX_IDS = 50;
 
 router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const body = req.body as { productIds?: unknown; scene?: unknown };
+    const body = req.body as { productIds?: unknown; scene?: unknown; mode?: unknown };
     const ids = Array.isArray(body.productIds)
       ? body.productIds.filter((x): x is string => typeof x === "string" && x.length > 0)
       : [];
+    const modeRaw = typeof body.mode === "string" ? body.mode : "prepend";
+    const mode: "prepend" | "overwrite" | "new" =
+      modeRaw === "overwrite" || modeRaw === "new" ? modeRaw : "prepend";
     if (ids.length === 0) {
       res.status(400).json({ error: "productIds array is required", code: "VALIDATION_ERROR" });
       return;
@@ -653,13 +669,19 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
     // Fetch all products once (owner-scoped). We'll dispatch per-product
     // enhancement in parallel with a concurrency cap — failures don't stop
     // the rest, and credits are consumed/refunded per-product.
-    const products = await prisma.product.findMany({
-      where: { id: { in: ids }, userId: req.auth!.userId },
-      select: { id: true, images: true },
-    });
-    const foundMap = new Map(products.map((p) => [p.id, p]));
+    // For mode="new" we need the full product to clone it; for the other
+    // modes only id + images are enough.
+    const products = mode === "new"
+      ? await prisma.product.findMany({
+          where: { id: { in: ids }, userId: req.auth!.userId },
+        })
+      : await prisma.product.findMany({
+          where: { id: { in: ids }, userId: req.auth!.userId },
+          select: { id: true, images: true },
+        });
+    const foundMap = new Map<string, typeof products[number]>(products.map((p) => [p.id, p]));
 
-    const succeeded: { productId: string; enhancedImageUrl: string }[] = [];
+    const succeeded: { productId: string; enhancedImageUrl: string; newProductId?: string }[] = [];
     const failed: { productId: string; error: string }[] = [];
     let lastRemainingCredits: number | null = null;
 
@@ -716,13 +738,54 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
           background: scene,
           folderName: "Enhanced Products",
         });
-        await prisma.product.update({
-          where: { id: product.id },
-          data: { images: [saved.imageUrl, ...images] },
-        });
+
+        let newProductId: string | undefined;
+        if (mode === "new") {
+          // Clone the product. We fetched the full row above in mode === "new"
+          // so `product` has every field available on Product.
+          const src = product as Awaited<ReturnType<typeof prisma.product.findFirst>>;
+          if (!src) throw new Error("Source product not found for clone");
+          const existingTags = Array.isArray(src.tags) ? (src.tags as unknown[]).filter((t): t is string => typeof t === "string") : [];
+          const tagsWithAi = existingTags.includes("ai-enhanced") ? existingTags : [...existingTags, "ai-enhanced"];
+          const created = await prisma.product.create({
+            data: {
+              userId: req.auth!.userId,
+              title: `${src.title} (AI)`.slice(0, 255),
+              description: src.description,
+              price: src.price,
+              compareAtPrice: src.compareAtPrice,
+              // sku, marketplace linkage, and platform IDs must NOT be copied —
+              // (sku+userId) is unique and duplicating a platformProductId would
+              // make Shopify/Salla think two rows are the same product.
+              sku: null,
+              barcode: null,
+              currency: src.currency,
+              quantity: src.quantity,
+              images: [saved.imageUrl] as unknown as Prisma.InputJsonValue,
+              category: src.category,
+              productType: src.productType,
+              vendor: src.vendor,
+              tags: tagsWithAi as unknown as Prisma.InputJsonValue,
+              weight: src.weight,
+              weightUnit: src.weightUnit,
+              status: "DRAFT",
+            },
+            select: { id: true },
+          });
+          newProductId = created.id;
+        } else {
+          // prepend (default) or overwrite — update in place
+          const nextImages = mode === "overwrite" ? [saved.imageUrl] : [saved.imageUrl, ...images];
+          await prisma.product.update({
+            where: { id: product.id },
+            data: { images: nextImages },
+          });
+        }
+
         succeeded.push({
           productId: product.id,
           enhancedImageUrl: signMediaPath(saved.imagePath, MEDIA_TTL_SHORT),
+          ...(newProductId ? { newProductId } : {}),
         });
         lastRemainingCredits = creditUsage.totalCredits;
       } catch (innerErr: any) {
@@ -784,6 +847,7 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
       remainingCredits: lastRemainingCredits,
       total: ids.length,
       scene,
+      mode,
     });
   } catch (err) {
     console.error("Bulk enhance error:", err);
