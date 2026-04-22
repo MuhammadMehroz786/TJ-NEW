@@ -36,9 +36,8 @@ export function CreatorSidebar() {
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-64 bg-slate-900 text-slate-300 flex flex-col z-50">
-      <div className="h-16 flex items-center px-6 border-b border-slate-800">
-        <img src="/White.jpeg" alt="TijarFlow" className="h-8 w-auto rounded" />
-        <span className="ml-3 text-lg font-semibold text-white tracking-tight">TijarFlow</span>
+      <div className="h-16 flex items-center px-5 border-b border-slate-800">
+        <img src="/logo-dark.png" alt="TijarFlow" className="h-8 w-auto" />
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">

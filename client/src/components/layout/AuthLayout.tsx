@@ -13,13 +13,10 @@ export function AuthLayout({ children }: AuthLayoutProps) {
         {/* Logo */}
         <div className="flex items-center justify-center mb-8">
           <img
-            src="/Black.jpeg"
+            src="/logo-light.png"
             alt="TijarFlow"
-            className="h-10 w-auto rounded"
+            className="h-11 w-auto"
           />
-          <span className="ml-3 text-2xl font-semibold text-slate-900 tracking-tight">
-            TijarFlow
-          </span>
         </div>
 
         {children}
