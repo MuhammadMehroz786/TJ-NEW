@@ -527,6 +527,10 @@ export function Products() {
   const [enhanceProductSceneText, setEnhanceProductSceneText] = useState("");
   const [enhanceProductRunning, setEnhanceProductRunning] = useState(false);
 
+  // Product detail view state — read-only drawer opened by clicking a row's title
+  const [detailProduct, setDetailProduct] = useState<Product | null>(null);
+  const [detailImageIndex, setDetailImageIndex] = useState(0);
+
   // Bulk enhance (multiple products at once) state
   const [bulkEnhanceOpen, setBulkEnhanceOpen] = useState(false);
   const [bulkEnhanceScene, setBulkEnhanceScene] = useState("studio");
@@ -835,6 +839,11 @@ export function Products() {
     } finally {
       setPushing(false);
     }
+  };
+
+  const openDetail = (product: Product) => {
+    setDetailProduct(product);
+    setDetailImageIndex(0);
   };
 
   const openImport = () => {
@@ -1228,22 +1237,28 @@ export function Products() {
                     </TableCell>
                     <TableCell>
                       {product.images?.[0] ? (
-                        <img
-                          src={product.images[0] as string}
-                          alt=""
-                          className="h-10 w-10 rounded-lg object-cover bg-slate-100"
-                        />
+                        <button type="button" onClick={() => openDetail(product)} className="block">
+                          <img
+                            src={product.images[0] as string}
+                            alt=""
+                            className="h-10 w-10 rounded-lg object-cover bg-slate-100 hover:ring-2 hover:ring-teal-300 transition-all"
+                          />
+                        </button>
                       ) : (
-                        <div className="h-10 w-10 rounded-lg bg-slate-100 flex items-center justify-center">
+                        <button type="button" onClick={() => openDetail(product)} className="h-10 w-10 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors">
                           <Package className="h-4 w-4 text-slate-300" />
-                        </div>
+                        </button>
                       )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5 max-w-[220px]">
-                        <p className="font-medium text-slate-800 truncate">
+                        <button
+                          type="button"
+                          onClick={() => openDetail(product)}
+                          className="font-medium text-slate-800 truncate hover:text-teal-700 hover:underline text-left"
+                        >
                           {product.title}
-                        </p>
+                        </button>
                         {product.tags?.includes("ai-enhanced") && (
                           <span
                             title="Generated with AI Studio"
@@ -2019,6 +2034,178 @@ export function Products() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Product Detail View */}
+      <Dialog open={!!detailProduct} onOpenChange={(open) => { if (!open) setDetailProduct(null); }}>
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
+          {detailProduct && (() => {
+            const p = detailProduct;
+            const imgs = p.images || [];
+            const active = imgs[detailImageIndex] || imgs[0];
+            const isAi = Array.isArray(p.tags) && p.tags.includes("ai-enhanced");
+            const created = new Date(p.createdAt);
+            const updated = new Date(p.updatedAt);
+            return (
+              <div>
+                <DialogHeader className="mb-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <DialogTitle className="text-xl flex items-center gap-2">
+                        <span className="truncate">{p.title}</span>
+                        {isAi && (
+                          <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-gradient-to-r from-amber-50 to-fuchsia-50 text-amber-700 border border-amber-200">
+                            <Sparkles className="h-2.5 w-2.5" />AI
+                          </span>
+                        )}
+                      </DialogTitle>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <Badge className={statusColors[p.status] || ""}>{p.status}</Badge>
+                        {p.marketplaceConnection ? (
+                          <Badge variant="outline" className={platformColors[p.marketplaceConnection.platform] || ""}>
+                            {p.marketplaceConnection.platform} · {p.marketplaceConnection.storeName}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-slate-400">Manual</span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { setDetailProduct(null); openEdit(p); }}
+                    >
+                      <Pencil className="h-3.5 w-3.5 mr-1.5" />Edit
+                    </Button>
+                  </div>
+                </DialogHeader>
+
+                <div className="grid md:grid-cols-[1fr,1fr] gap-6">
+                  {/* Gallery */}
+                  <div>
+                    <div className="aspect-square rounded-lg bg-slate-50 border border-slate-200 overflow-hidden flex items-center justify-center">
+                      {active ? (
+                        <img src={active} alt={p.title} className="w-full h-full object-contain" />
+                      ) : (
+                        <div className="text-center text-slate-400">
+                          <Package className="h-12 w-12 mx-auto mb-2" />
+                          <p className="text-sm">No images</p>
+                        </div>
+                      )}
+                    </div>
+                    {imgs.length > 1 && (
+                      <div className="mt-3 grid grid-cols-6 gap-2">
+                        {imgs.map((src, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setDetailImageIndex(i)}
+                            className={`aspect-square rounded-md overflow-hidden border transition-all ${i === detailImageIndex ? "border-teal-500 ring-2 ring-teal-200" : "border-slate-200 hover:border-slate-300"}`}
+                          >
+                            <img src={src} alt="" className="w-full h-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {imgs.length > 0 && (
+                      <p className="text-[11px] text-slate-400 mt-2 text-center">
+                        Image {detailImageIndex + 1} of {imgs.length}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div className="space-y-5">
+                    {/* Price */}
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Price</p>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl font-bold text-slate-900">{p.price}</span>
+                        <span className="text-sm text-slate-500">{p.currency}</span>
+                        {p.compareAtPrice && Number(p.compareAtPrice) > 0 && (
+                          <span className="text-sm text-slate-400 line-through">{p.compareAtPrice}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Inventory */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">In stock</p>
+                        <p className="text-lg font-semibold text-slate-800">{p.quantity}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">SKU</p>
+                        <p className="text-sm font-mono text-slate-700">{p.sku || <span className="text-slate-400">—</span>}</p>
+                      </div>
+                    </div>
+
+                    {p.description && (
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Description</p>
+                        <p className="text-sm text-slate-700 whitespace-pre-wrap">{p.description}</p>
+                      </div>
+                    )}
+
+                    {(p.category || p.productType || p.vendor) && (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                        {p.category && (
+                          <div>
+                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Category</p>
+                            <p className="text-slate-700">{p.category}</p>
+                          </div>
+                        )}
+                        {p.productType && (
+                          <div>
+                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Type</p>
+                            <p className="text-slate-700">{p.productType}</p>
+                          </div>
+                        )}
+                        {p.vendor && (
+                          <div>
+                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Vendor</p>
+                            <p className="text-slate-700">{p.vendor}</p>
+                          </div>
+                        )}
+                        {p.barcode && (
+                          <div>
+                            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Barcode</p>
+                            <p className="text-slate-700 font-mono text-xs">{p.barcode}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {(p.weight || p.weightUnit) && (
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Weight</p>
+                        <p className="text-sm text-slate-700">{p.weight} {p.weightUnit}</p>
+                      </div>
+                    )}
+
+                    {Array.isArray(p.tags) && p.tags.length > 0 && (
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Tags</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {p.tags.map((tag, i) => (
+                            <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-teal-50 text-teal-700 border border-teal-200">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-3 border-t border-slate-200 text-xs text-slate-500 space-y-0.5">
+                      <p>Created {created.toLocaleString()}</p>
+                      <p>Last updated {updated.toLocaleString()}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
