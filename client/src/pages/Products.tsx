@@ -15,7 +15,6 @@ import {
   Send,
   Store,
   ShoppingBag,
-  Megaphone,
   Sparkles,
   Loader2,
   FileUp,
@@ -556,6 +555,10 @@ export function Products() {
         ? "text-amber-600"
         : "text-teal-700";
 
+  // Advertise flow is hidden under MVP scope but the dialog + handler are
+  // kept for when we re-enable the creator network. Suppress the unused-var
+  // TS error while the entry point is off.
+  // @ts-expect-error kept for future re-enable
   const openAdvertise = (product: Product) => {
     setAdvertiseProduct(product);
     setSelectedCreator(null);
