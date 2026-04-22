@@ -266,9 +266,6 @@ export function Billing() {
               {balance?.totalCredits ?? 0}
               <span className="text-base font-normal ml-2" style={{ color: "#94A3B8" }}>Cr.</span>
             </p>
-            <p className="text-xs mt-2" style={{ color: "#94A3B8" }}>
-              Monthly &gt; last Local confirmed
-            </p>
           </div>
 
           {/* Usage chart */}

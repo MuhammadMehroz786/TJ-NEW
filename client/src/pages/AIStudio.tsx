@@ -64,6 +64,23 @@ export function AIStudio() {
   const [undoing, setUndoing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Gallery multi-select (different from `selectedImages` above, which
+  // stages freshly-uploaded images for enhancement). These are ids of
+  // existing gallery rows that the merchant ticked for a bulk action.
+  const [selectedGalleryIds, setSelectedGalleryIds] = useState<Set<string>>(new Set());
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkEnhanceOpen, setBulkEnhanceOpen] = useState(false);
+  const [bulkEnhanceScene, setBulkEnhanceScene] = useState("studio");
+  const [bulkEnhanceSceneText, setBulkEnhanceSceneText] = useState("");
+  const [bulkEnhanceRunning, setBulkEnhanceRunning] = useState(false);
+  const [bulkRelabelOpen, setBulkRelabelOpen] = useState(false);
+  const [bulkRelabelValue, setBulkRelabelValue] = useState("");
+  const [bulkAddProductOpen, setBulkAddProductOpen] = useState(false);
+  const [bulkProductQuery, setBulkProductQuery] = useState("");
+  const [bulkProductResults, setBulkProductResults] = useState<Array<{ id: string; title: string; images?: string[] }>>([]);
+  const [bulkProductLoading, setBulkProductLoading] = useState(false);
+  const [bulkActionRunning, setBulkActionRunning] = useState(false);
+
   const fetchFolders = useCallback(() => {
     api.get("/ai-studio/folders").then((res) => setFolders(res.data || [])).catch(() => toast.error("Failed to load folders"));
   }, []);
@@ -298,6 +315,184 @@ export function AIStudio() {
     }
   };
 
+  // ── Gallery multi-select handlers ────────────────────────────────────────
+  const toggleSelected = (id: string) => {
+    setSelectedGalleryIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedGalleryIds(new Set());
+
+  const runBulkMove = async (targetFolderId: string | null) => {
+    const ids = Array.from(selectedGalleryIds);
+    if (ids.length === 0) return;
+    setBulkActionRunning(true);
+    try {
+      await api.patch("/ai-studio/images/bulk", { ids, action: "move", folderId: targetFolderId });
+      const folderName = targetFolderId ? folders.find((f) => f.id === targetFolderId)?.name : null;
+      toast.success(folderName ? `Moved ${ids.length} to "${folderName}"` : `Unfiled ${ids.length} image(s)`);
+      setBulkMoveOpen(false);
+      clearSelection();
+      fetchImages();
+      fetchFolders();
+    } catch {
+      toast.error("Bulk move failed");
+    } finally {
+      setBulkActionRunning(false);
+    }
+  };
+
+  const runBulkDelete = async () => {
+    const ids = Array.from(selectedGalleryIds);
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} image${ids.length === 1 ? "" : "s"}? This can't be undone.`)) return;
+    setBulkActionRunning(true);
+    try {
+      const res = await api.patch("/ai-studio/images/bulk", { ids, action: "delete" });
+      toast.success(`Deleted ${res.data.deleted ?? ids.length} image(s)`);
+      clearSelection();
+      fetchImages();
+      fetchFolders();
+    } catch {
+      toast.error("Bulk delete failed");
+    } finally {
+      setBulkActionRunning(false);
+    }
+  };
+
+  const runBulkRelabel = async () => {
+    const ids = Array.from(selectedGalleryIds);
+    const background = bulkRelabelValue.trim();
+    if (ids.length === 0 || !background) return;
+    setBulkActionRunning(true);
+    try {
+      await api.patch("/ai-studio/images/bulk", { ids, action: "relabel", background });
+      toast.success(`Relabelled ${ids.length} image(s)`);
+      setBulkRelabelOpen(false);
+      setBulkRelabelValue("");
+      clearSelection();
+      fetchImages();
+    } catch {
+      toast.error("Relabel failed");
+    } finally {
+      setBulkActionRunning(false);
+    }
+  };
+
+  const runBulkDownload = async () => {
+    const ids = Array.from(selectedGalleryIds);
+    if (ids.length === 0) return;
+    setBulkActionRunning(true);
+    const toastId = toast.loading(`Preparing ZIP with ${ids.length} image(s)...`);
+    try {
+      // responseType: 'blob' so axios doesn't try to parse the bytes as JSON
+      const res = await api.post("/ai-studio/images/download-zip", { ids }, { responseType: "blob" });
+      const blob = new Blob([res.data], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `tijarflow-ai-studio-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.dismiss(toastId);
+      toast.success(`Downloaded ${ids.length} image(s)`);
+    } catch {
+      toast.dismiss(toastId);
+      toast.error("ZIP download failed");
+    } finally {
+      setBulkActionRunning(false);
+    }
+  };
+
+  const runBulkEnhance = async () => {
+    const ids = Array.from(selectedGalleryIds);
+    if (ids.length === 0) return;
+    setBulkEnhanceRunning(true);
+    const toastId = toast.loading(`Enhancing ${ids.length} image(s)... this may take a few minutes`);
+    try {
+      const res = await api.post("/ai-studio/images/bulk-enhance", {
+        ids,
+        scene: bulkEnhanceScene,
+        sceneText: bulkEnhanceSceneText.trim() || undefined,
+        folderId: selectedFolderId === "all" ? null : selectedFolderId,
+      });
+      const { succeeded, failed, remainingCredits } = res.data as {
+        succeeded: { sourceId: string; newId: string }[];
+        failed: { sourceId: string; error: string }[];
+        remainingCredits: number;
+      };
+      toast.dismiss(toastId);
+      if (typeof remainingCredits === "number") setAiCredits(remainingCredits);
+      if (failed.length === 0) toast.success(`Enhanced ${succeeded.length} new image(s)`);
+      else if (succeeded.length === 0) { toast.error(`All ${failed.length} failed`); console.error(failed); }
+      else { toast.warning(`Enhanced ${succeeded.length} · ${failed.length} failed`); console.warn(failed); }
+      setBulkEnhanceOpen(false);
+      setBulkEnhanceSceneText("");
+      clearSelection();
+      fetchImages();
+    } catch (err: unknown) {
+      toast.dismiss(toastId);
+      toast.error(
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        "Bulk enhancement failed",
+      );
+    } finally {
+      setBulkEnhanceRunning(false);
+    }
+  };
+
+  const searchProductsForBulkAdd = useCallback(async (q: string) => {
+    setBulkProductLoading(true);
+    try {
+      const res = await api.get("/products", { params: { page: 1, pageSize: 30, search: q } });
+      setBulkProductResults(res.data?.data || []);
+    } catch {
+      setBulkProductResults([]);
+    } finally {
+      setBulkProductLoading(false);
+    }
+  }, []);
+
+  const runBulkAddToProduct = async (productId: string) => {
+    const ids = Array.from(selectedGalleryIds);
+    if (ids.length === 0 || !productId) return;
+    setBulkActionRunning(true);
+    try {
+      const product = bulkProductResults.find((p) => p.id === productId);
+      const existing = Array.isArray(product?.images) ? product!.images! : [];
+      const urlsToAdd = images
+        .filter((img) => selectedGalleryIds.has(img.id))
+        .map((img) => img.imageUrl);
+      await api.put(`/products/${productId}`, {
+        images: [...urlsToAdd, ...existing],
+      });
+      toast.success(`Added ${ids.length} image(s) to "${product?.title ?? "product"}"`);
+      setBulkAddProductOpen(false);
+      clearSelection();
+    } catch {
+      toast.error("Couldn't add to product");
+    } finally {
+      setBulkActionRunning(false);
+    }
+  };
+
+  const runBulkCreateProduct = () => {
+    const ids = Array.from(selectedGalleryIds);
+    if (ids.length === 0) return;
+    // Park the selected imageUrls in sessionStorage and hop to Products page,
+    // which reads them and opens the Add Product dialog pre-populated.
+    const urls = images.filter((img) => selectedGalleryIds.has(img.id)).map((img) => img.imageUrl);
+    try {
+      sessionStorage.setItem("tijarflow_prefill_product_images", JSON.stringify(urls));
+      navigate("/products?new=1");
+    } catch {
+      toast.error("Couldn't hand off to Products page");
+    }
+  };
+
   const filteredImages = useMemo(() => {
     const byFolder = selectedFolderId === "all" ? images : images.filter((img) => img.folder?.id === selectedFolderId);
     const query = search.trim().toLowerCase();
@@ -453,10 +648,64 @@ export function AIStudio() {
                   <p className="text-slate-400 text-sm mt-1">{t("aiStudio.emptyHint")}</p>
                 </div>
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {filteredImages.map((item) => (
-                    <div key={item.id} draggable onDragStart={(e) => e.dataTransfer.setData("text/ai-studio-image-id", item.id)} className="border border-slate-200 rounded-lg overflow-hidden bg-white">
-                      <div className="relative">
+                <>
+                  {/* Bulk action bar — appears when any gallery items are selected */}
+                  {selectedGalleryIds.size > 0 && (
+                    <div className="mb-3 p-3 bg-teal-50 border border-teal-200 rounded-lg flex items-center flex-wrap gap-2">
+                      <span className="text-sm font-medium text-teal-800">
+                        {selectedGalleryIds.size} selected
+                      </span>
+                      <div className="h-5 w-px bg-teal-200 mx-1" />
+                      <Button size="sm" variant="outline" onClick={() => setBulkMoveOpen(true)} disabled={bulkActionRunning}>
+                        <FolderPlus className="h-3.5 w-3.5 mr-1.5" />Move
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={runBulkDownload} disabled={bulkActionRunning}>
+                        <Download className="h-3.5 w-3.5 mr-1.5" />Download ZIP
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setBulkEnhanceOpen(true)} disabled={bulkActionRunning} className="text-amber-700 border-amber-200 hover:bg-amber-50">
+                        <Sparkles className="h-3.5 w-3.5 mr-1.5" />Enhance again
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setBulkRelabelValue(""); setBulkRelabelOpen(true); }} disabled={bulkActionRunning}>
+                        <Pencil className="h-3.5 w-3.5 mr-1.5" />Relabel
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setBulkProductQuery(""); setBulkProductResults([]); setBulkAddProductOpen(true); searchProductsForBulkAdd(""); }} disabled={bulkActionRunning}>
+                        <Package className="h-3.5 w-3.5 mr-1.5" />Add to product
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={runBulkCreateProduct} disabled={bulkActionRunning}>
+                        <ImagePlus className="h-3.5 w-3.5 mr-1.5" />Create product
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={runBulkDelete} disabled={bulkActionRunning} className="text-red-600 border-red-200 hover:bg-red-50">
+                        <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete
+                      </Button>
+                      <div className="ml-auto">
+                        <button onClick={clearSelection} className="text-xs text-slate-500 hover:text-slate-700 underline">Clear</button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {filteredImages.map((item) => {
+                    const isSelected = selectedGalleryIds.has(item.id);
+                    return (
+                    <div
+                      key={item.id}
+                      draggable
+                      onDragStart={(e) => e.dataTransfer.setData("text/ai-studio-image-id", item.id)}
+                      className={`border rounded-lg overflow-hidden bg-white transition-shadow ${isSelected ? "border-teal-500 ring-2 ring-teal-200" : "border-slate-200"}`}
+                    >
+                      <div className="relative group">
+                        {/* Selection checkbox — top-left overlay, always visible once anything is selected, otherwise shows on hover */}
+                        <label
+                          onClick={(e) => e.stopPropagation()}
+                          className={`absolute top-2 left-2 z-10 h-6 w-6 rounded bg-white/90 border border-slate-300 flex items-center justify-center cursor-pointer transition-opacity ${selectedGalleryIds.size > 0 || isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelected(item.id)}
+                            className="h-3.5 w-3.5 accent-teal-600"
+                          />
+                        </label>
                         <button onClick={() => setPreviewImage(item)} className="w-full"><img src={item.imageUrl} alt="Enhanced product" className="w-full h-44 object-cover bg-slate-50" /></button>
                         <button onClick={() => handleDelete(item.id)} className="absolute top-2 right-2 h-7 w-7 rounded-full bg-black/70 text-white flex items-center justify-center"><X className="h-4 w-4" /></button>
                       </div>
@@ -476,8 +725,10 @@ export function AIStudio() {
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
+                </>
               )}
             </div>
           </div>
@@ -592,6 +843,140 @@ export function AIStudio() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Move Dialog */}
+      <Dialog open={bulkMoveOpen} onOpenChange={(open) => { if (!open && !bulkActionRunning) setBulkMoveOpen(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Move {selectedGalleryIds.size} image{selectedGalleryIds.size === 1 ? "" : "s"} to…</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Button variant="outline" className="w-full justify-start" onClick={() => runBulkMove(null)} disabled={bulkActionRunning}>
+              <X className="mr-2 h-4 w-4" />Unfiled (remove from current folder)
+            </Button>
+            <div className="border-t pt-2 max-h-80 overflow-y-auto space-y-1">
+              {folders.length === 0 && <p className="text-sm text-slate-500 text-center py-4">No folders yet — create one from the sidebar.</p>}
+              {folders.map((folder) => (
+                <Button key={folder.id} variant="outline" className="w-full justify-start" onClick={() => runBulkMove(folder.id)} disabled={bulkActionRunning}>
+                  <FolderPlus className="mr-2 h-4 w-4" />
+                  {folder.name}
+                  <span className="ml-auto text-xs text-slate-400">{folder._count?.images ?? 0}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Enhance Dialog */}
+      <Dialog open={bulkEnhanceOpen} onOpenChange={(open) => { if (!open && !bulkEnhanceRunning) setBulkEnhanceOpen(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-amber-500" />Enhance {selectedGalleryIds.size} image{selectedGalleryIds.size === 1 ? "" : "s"} again</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">Each selected image becomes the input for a fresh enhancement. Originals are kept; new results land in the current folder.</p>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Background</label>
+              <Select value={bulkEnhanceScene} onValueChange={setBulkEnhanceScene} disabled={!!bulkEnhanceSceneText.trim()}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {backgroundOptions.map((opt) => <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-slate-700">Custom theme <span className="text-slate-400 font-normal">(optional)</span></label>
+                <span className="text-[11px] text-slate-400">{bulkEnhanceSceneText.length}/300</span>
+              </div>
+              <textarea
+                value={bulkEnhanceSceneText}
+                onChange={(e) => setBulkEnhanceSceneText(e.target.value.slice(0, 300))}
+                placeholder="e.g. soft pastel background with warm morning light"
+                rows={2}
+                className="flex w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 resize-none"
+              />
+            </div>
+            <div className="p-3 bg-slate-50 rounded-md text-sm">
+              <div className="flex items-center justify-between"><span className="text-slate-600">Credit cost</span><span className="font-medium">{selectedGalleryIds.size} credit{selectedGalleryIds.size === 1 ? "" : "s"}</span></div>
+              <div className="flex items-center justify-between"><span className="text-slate-600">Credits available</span><span className="font-medium">{aiCredits ?? "—"}</span></div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setBulkEnhanceOpen(false)} disabled={bulkEnhanceRunning}>Cancel</Button>
+              <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={runBulkEnhance} disabled={bulkEnhanceRunning || (aiCredits !== null && aiCredits <= 0)}>
+                {bulkEnhanceRunning ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enhancing...</> : <><Sparkles className="mr-2 h-4 w-4" />Enhance {selectedGalleryIds.size}</>}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Relabel Dialog */}
+      <Dialog open={bulkRelabelOpen} onOpenChange={(open) => { if (!open && !bulkActionRunning) setBulkRelabelOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Relabel {selectedGalleryIds.size} image{selectedGalleryIds.size === 1 ? "" : "s"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">Overwrites the scene/background label shown under each image (e.g. "Kitchen", "Summer 2026", "Hero shot").</p>
+            <Input
+              value={bulkRelabelValue}
+              onChange={(e) => setBulkRelabelValue(e.target.value.slice(0, 80))}
+              placeholder="New label"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setBulkRelabelOpen(false)} disabled={bulkActionRunning}>Cancel</Button>
+              <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={runBulkRelabel} disabled={bulkActionRunning || !bulkRelabelValue.trim()}>Relabel</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Add to Product Dialog */}
+      <Dialog open={bulkAddProductOpen} onOpenChange={(open) => { if (!open && !bulkActionRunning) setBulkAddProductOpen(false); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add {selectedGalleryIds.size} image{selectedGalleryIds.size === 1 ? "" : "s"} to a product</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                value={bulkProductQuery}
+                onChange={(e) => { setBulkProductQuery(e.target.value); searchProductsForBulkAdd(e.target.value); }}
+                placeholder="Search your products by title..."
+                className="pl-10"
+              />
+            </div>
+            <div className="max-h-80 overflow-y-auto border border-slate-200 rounded-md divide-y">
+              {bulkProductLoading ? (
+                <div className="p-4 text-center text-sm text-slate-500">Loading...</div>
+              ) : bulkProductResults.length === 0 ? (
+                <div className="p-4 text-center text-sm text-slate-500">No products found</div>
+              ) : (
+                bulkProductResults.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => runBulkAddToProduct(p.id)}
+                    disabled={bulkActionRunning}
+                    className="w-full flex items-center gap-3 px-3 py-2 hover:bg-slate-50 text-left disabled:opacity-60"
+                  >
+                    {p.images?.[0] ? (
+                      <img src={p.images[0]} alt="" className="h-10 w-10 rounded object-cover bg-slate-100" />
+                    ) : (
+                      <div className="h-10 w-10 rounded bg-slate-100 flex items-center justify-center"><Package className="h-4 w-4 text-slate-300" /></div>
+                    )}
+                    <span className="text-sm font-medium text-slate-800 truncate flex-1">{p.title}</span>
+                    <Plus className="h-4 w-4 text-slate-400" />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

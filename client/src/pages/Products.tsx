@@ -694,6 +694,29 @@ export function Products() {
     api.get("/user/ai-credits")
       .then((res) => setAiCredits(res.data.remainingCredits))
       .catch(() => { });
+
+    // Handle hand-off from AI Studio "Create product from selection": open
+    // the Add Product dialog pre-populated with the image URLs we parked in
+    // sessionStorage. Consume the key so a refresh doesn't re-trigger.
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("new") === "1") {
+        try {
+          const raw = sessionStorage.getItem("tijarflow_prefill_product_images");
+          if (raw) {
+            const urls = JSON.parse(raw) as unknown;
+            if (Array.isArray(urls) && urls.every((x) => typeof x === "string")) {
+              sessionStorage.removeItem("tijarflow_prefill_product_images");
+              setEditingProduct(null);
+              setForm({ ...emptyProduct, images: urls as string[] });
+              setDialogOpen(true);
+              // Drop the query string so a refresh doesn't re-open
+              window.history.replaceState({}, "", "/products");
+            }
+          }
+        } catch { /* non-critical */ }
+      }
+    }
   }, []);
 
   useEffect(() => {

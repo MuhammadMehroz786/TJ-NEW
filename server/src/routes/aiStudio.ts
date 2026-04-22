@@ -8,6 +8,12 @@ import { authenticate, AuthRequest, requireRole } from "../middleware/auth";
 import { AICreditError, consumeWeeklyAICredit, refundOneCredit } from "../services/aiCredits";
 import { refineProductImage } from "../services/imageRefinement";
 import { signMediaPath, MEDIA_TTL_SHORT } from "../lib/mediaSign";
+import { enhanceWithGemini, backgroundScenes as enhanceBgScenes, EnhanceError } from "../lib/enhanceImage";
+import { saveEnhancementToLibrary } from "../lib/imageStorage";
+// Loaded untyped to sidestep the stale @types/express-serve-static-core tree
+// that multer's types pull in. See products.ts for the same pattern.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const AdmZip = require("adm-zip") as any;
 
 // Sign the imageUrl on every record returned to the client. Stored DB value
 // stays as a plain /media/... path; signatures are minted per-response.
@@ -840,6 +846,323 @@ router.delete("/images/:id", async (req: AuthRequest, res: Response): Promise<vo
     res.json({ message: "Image deleted" });
   } catch {
     res.status(500).json({ error: "Failed to delete image", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── Bulk image operations ─────────────────────────────────────────────────────
+// One endpoint for destructive/labelling bulk actions over selected gallery
+// images. Kept tight — the merchant-facing flow has move, delete, and a
+// bulk relabel of the "background" scene text that shows under each tile.
+//
+// Body: { ids: string[], action: "move" | "delete" | "relabel",
+//         folderId?: string | null,   // required when action=move
+//         background?: string }        // required when action=relabel
+const BULK_MAX_IDS = 200;
+
+router.patch("/images/bulk", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const body = req.body as { ids?: unknown; action?: unknown; folderId?: unknown; background?: unknown };
+    const ids = Array.isArray(body.ids)
+      ? body.ids.filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [];
+    if (ids.length === 0) {
+      res.status(400).json({ error: "ids array is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (ids.length > BULK_MAX_IDS) {
+      res.status(400).json({ error: `Too many items (max ${BULK_MAX_IDS})`, code: "TOO_MANY" });
+      return;
+    }
+
+    const action = body.action;
+    const where = { id: { in: ids }, userId: req.auth!.userId };
+
+    if (action === "move") {
+      let folderId: string | null = null;
+      if (body.folderId !== null && body.folderId !== undefined && body.folderId !== "") {
+        if (typeof body.folderId !== "string") {
+          res.status(400).json({ error: "folderId must be a string or null", code: "VALIDATION_ERROR" });
+          return;
+        }
+        // Confirm the target folder belongs to this user before moving
+        const folder = await prisma.aiStudioFolder.findFirst({
+          where: { id: body.folderId, userId: req.auth!.userId },
+          select: { id: true },
+        });
+        if (!folder) {
+          res.status(404).json({ error: "Target folder not found", code: "NOT_FOUND" });
+          return;
+        }
+        folderId = folder.id;
+      }
+      const result = await prisma.aiStudioImage.updateMany({ where, data: { folderId } });
+      res.json({ moved: result.count });
+      return;
+    }
+
+    if (action === "relabel") {
+      const background = typeof body.background === "string" ? body.background.trim().slice(0, 80) : "";
+      if (!background) {
+        res.status(400).json({ error: "background is required for relabel", code: "VALIDATION_ERROR" });
+        return;
+      }
+      const result = await prisma.aiStudioImage.updateMany({ where, data: { background } });
+      res.json({ relabelled: result.count });
+      return;
+    }
+
+    if (action === "delete") {
+      // Find files to unlink before the DB delete so we don't orphan storage
+      const rows = await prisma.aiStudioImage.findMany({
+        where,
+        select: { imagePath: true },
+      });
+      const storageRoot = path.resolve(process.cwd(), "storage");
+      await Promise.all(rows.map((r) =>
+        fs.unlink(path.join(storageRoot, r.imagePath)).catch(() => {}),
+      ));
+      const result = await prisma.aiStudioImage.deleteMany({ where });
+      res.json({ deleted: result.count });
+      return;
+    }
+
+    res.status(400).json({ error: "action must be one of move, delete, relabel", code: "VALIDATION_ERROR" });
+  } catch (err) {
+    console.error("Bulk image op error:", err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  }
+});
+
+// POST /api/ai-studio/images/download-zip — stream selected images as a ZIP.
+// adm-zip builds in memory; fine for the realistic merchant case (~50 shots),
+// would want to switch to `archiver` streaming if batch sizes grow past a
+// few hundred MB.
+// Body: { ids: string[] }
+router.post("/images/download-zip", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const ids = Array.isArray(req.body?.ids)
+      ? (req.body.ids as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [];
+    if (ids.length === 0) {
+      res.status(400).json({ error: "ids array is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (ids.length > BULK_MAX_IDS) {
+      res.status(400).json({ error: `Too many items (max ${BULK_MAX_IDS})`, code: "TOO_MANY" });
+      return;
+    }
+
+    const rows = await prisma.aiStudioImage.findMany({
+      where: { id: { in: ids }, userId: req.auth!.userId },
+      select: { id: true, imagePath: true, background: true, createdAt: true },
+    });
+    if (rows.length === 0) {
+      res.status(404).json({ error: "No images found", code: "NOT_FOUND" });
+      return;
+    }
+
+    const storageRoot = path.resolve(process.cwd(), "storage");
+    const zip = new AdmZip();
+    let added = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const abs = path.join(storageRoot, r.imagePath);
+      try {
+        const buf = await fs.readFile(abs);
+        const ext = path.extname(r.imagePath) || ".png";
+        // Human-readable name, deduplicated with an index so the same
+        // "kitchen" scene doesn't overwrite earlier ones in the zip.
+        const safeLabel = (r.background || "image").replace(/[^a-z0-9-_]/gi, "-").slice(0, 40);
+        const fname = `${String(i + 1).padStart(3, "0")}-${safeLabel}${ext}`;
+        zip.addFile(fname, buf);
+        added++;
+      } catch {
+        // Missing file on disk — skip silently, continue the rest
+      }
+    }
+    if (added === 0) {
+      res.status(404).json({ error: "None of the selected images could be read", code: "NOT_FOUND" });
+      return;
+    }
+
+    const outBuffer = zip.toBuffer() as Buffer;
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="tijarflow-ai-studio-${stamp}.zip"`);
+    res.setHeader("Content-Length", String(outBuffer.length));
+    res.send(outBuffer);
+  } catch (err) {
+    console.error("Download zip error:", err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  }
+});
+
+// POST /api/ai-studio/images/bulk-enhance — run a fresh enhancement over N
+// library images at once. Each image becomes input for a new Gemini call
+// using the chosen scene (or custom theme text). Output is saved as a NEW
+// AiStudioImage so the originals stay intact.
+//
+// Body: { ids: string[], scene?: string, sceneText?: string, folderId?: string|null }
+const LIB_BULK_ENHANCE_CONCURRENCY = 3;
+const LIB_BULK_ENHANCE_MAX = 50;
+
+router.post("/images/bulk-enhance", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const body = req.body as { ids?: unknown; scene?: unknown; sceneText?: unknown; folderId?: unknown };
+    const ids = Array.isArray(body.ids)
+      ? body.ids.filter((x): x is string => typeof x === "string" && x.length > 0)
+      : [];
+    if (ids.length === 0) {
+      res.status(400).json({ error: "ids array is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+    if (ids.length > LIB_BULK_ENHANCE_MAX) {
+      res.status(400).json({ error: `Max ${LIB_BULK_ENHANCE_MAX} images per batch`, code: "TOO_MANY" });
+      return;
+    }
+    const sceneInput = typeof body.scene === "string" ? body.scene : "studio";
+    const scene = enhanceBgScenes[sceneInput] ? sceneInput : "studio";
+    const sceneText = typeof body.sceneText === "string" && body.sceneText.trim() ? body.sceneText.trim() : undefined;
+
+    let targetFolderName: string | undefined = undefined;
+    let targetFolderId: string | null = null;
+    if (body.folderId !== null && body.folderId !== undefined && body.folderId !== "") {
+      if (typeof body.folderId !== "string") {
+        res.status(400).json({ error: "folderId must be a string or null", code: "VALIDATION_ERROR" });
+        return;
+      }
+      const folder = await prisma.aiStudioFolder.findFirst({
+        where: { id: body.folderId, userId: req.auth!.userId },
+        select: { id: true, name: true },
+      });
+      if (!folder) {
+        res.status(404).json({ error: "Target folder not found", code: "NOT_FOUND" });
+        return;
+      }
+      targetFolderId = folder.id;
+      targetFolderName = folder.name;
+    }
+
+    const rows = await prisma.aiStudioImage.findMany({
+      where: { id: { in: ids }, userId: req.auth!.userId },
+      select: { id: true, imagePath: true },
+    });
+    const foundMap = new Map(rows.map((r) => [r.id, r]));
+
+    const succeeded: { sourceId: string; newId: string; enhancedImageUrl: string }[] = [];
+    const failed: { sourceId: string; error: string }[] = [];
+    let lastRemaining: number | null = null;
+
+    const enhanceOne = async (sourceId: string): Promise<void> => {
+      const src = foundMap.get(sourceId);
+      if (!src) { failed.push({ sourceId, error: "Image not found" }); return; }
+
+      const storageRoot = path.resolve(process.cwd(), "storage");
+      let inputBuf: Buffer;
+      try {
+        inputBuf = await fs.readFile(path.join(storageRoot, src.imagePath));
+      } catch {
+        failed.push({ sourceId, error: "Source file missing on disk" });
+        return;
+      }
+
+      // Detect mime from magic bytes, same as enhanceImage.detectImageMime
+      let mimeType: "image/png" | "image/jpeg" | "image/webp" | null = null;
+      if (inputBuf.length >= 12) {
+        if (inputBuf[0] === 0x89 && inputBuf[1] === 0x50 && inputBuf[2] === 0x4e && inputBuf[3] === 0x47) mimeType = "image/png";
+        else if (inputBuf[0] === 0xff && inputBuf[1] === 0xd8 && inputBuf[2] === 0xff) mimeType = "image/jpeg";
+        else if (
+          inputBuf[0] === 0x52 && inputBuf[1] === 0x49 && inputBuf[2] === 0x46 && inputBuf[3] === 0x46 &&
+          inputBuf[8] === 0x57 && inputBuf[9] === 0x45 && inputBuf[10] === 0x42 && inputBuf[11] === 0x50
+        ) mimeType = "image/webp";
+      }
+      if (!mimeType) {
+        failed.push({ sourceId, error: "Unsupported image format" });
+        return;
+      }
+
+      let creditUsage;
+      try {
+        creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
+      } catch (err) {
+        failed.push({ sourceId, error: err instanceof AICreditError ? err.message : "Credit check failed" });
+        throw err;
+      }
+
+      try {
+        const output = await enhanceWithGemini({
+          inputMime: mimeType,
+          inputBase64: inputBuf.toString("base64"),
+          scene,
+          sceneText,
+        });
+        const saved = await saveEnhancementToLibrary(prisma, {
+          userId: req.auth!.userId,
+          base64: output.base64,
+          mimeType: output.mimeType,
+          background: sceneText ? `custom: ${sceneText.slice(0, 60)}` : scene,
+          folderName: targetFolderName, // undefined → unfiled; folder existence already verified above
+        });
+        // If the caller chose a specific folder id, the helper auto-created-or-
+        // reused by name — but the NAME lookup may drift if the merchant renamed
+        // their folder. Force-set the folderId to be safe.
+        if (targetFolderId && saved.id) {
+          await prisma.aiStudioImage.update({ where: { id: saved.id }, data: { folderId: targetFolderId } });
+        }
+        succeeded.push({
+          sourceId,
+          newId: saved.id,
+          enhancedImageUrl: signMediaPath(saved.imagePath, MEDIA_TTL_SHORT),
+        });
+        lastRemaining = creditUsage.totalCredits;
+      } catch (innerErr: any) {
+        await refundOneCredit(prisma, req.auth!.userId, creditUsage.usedPool);
+        const msg = innerErr?.message || "Enhancement failed";
+        failed.push({ sourceId, error: innerErr instanceof EnhanceError ? innerErr.message : msg });
+      }
+    };
+
+    const queue = [...ids];
+    let creditsExhausted = false;
+    const worker = async (): Promise<void> => {
+      while (queue.length > 0) {
+        if (creditsExhausted) {
+          const id = queue.shift()!;
+          failed.push({ sourceId: id, error: "Credits exhausted" });
+          continue;
+        }
+        const id = queue.shift()!;
+        try { await enhanceOne(id); }
+        catch (err) {
+          if (err instanceof AICreditError) creditsExhausted = true;
+          if (!succeeded.some((s) => s.sourceId === id) && !failed.some((f) => f.sourceId === id)) {
+            failed.push({ sourceId: id, error: "Unexpected error" });
+          }
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(LIB_BULK_ENHANCE_CONCURRENCY, ids.length) }, () => worker()),
+    );
+
+    if (lastRemaining === null) {
+      const u = await prisma.user.findUnique({
+        where: { id: req.auth!.userId },
+        select: { aiCredits: true, purchasedCredits: true },
+      });
+      lastRemaining = (u?.aiCredits ?? 0) + (u?.purchasedCredits ?? 0);
+    }
+
+    res.json({
+      succeeded,
+      failed,
+      total: ids.length,
+      remainingCredits: lastRemaining,
+      scene: sceneText ? `custom` : scene,
+    });
+  } catch (err) {
+    console.error("Library bulk-enhance error:", err);
+    res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
   }
 });
 
