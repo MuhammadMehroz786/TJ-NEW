@@ -334,7 +334,7 @@ function ImageUploadSection({
     <div>
       <h3 className="text-sm font-semibold text-slate-900 mb-1">Media</h3>
       <p className="text-xs text-slate-500 mb-3">
-        Drag & drop images, browse files, or add by URL
+        Upload your own photos, add by URL, or pick from your AI Studio library
       </p>
 
       {/* Drop Zone */}
@@ -376,6 +376,20 @@ function ImageUploadSection({
         </div>
       </div>
 
+      {/* AI Studio picker — first-class action, visually distinct from the
+          URL input below so merchants find it even on narrow dialogs. */}
+      {onOpenStudioPicker && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onOpenStudioPicker}
+          className="w-full mt-3 border-teal-200 bg-teal-50/30 text-teal-700 hover:bg-teal-50 hover:border-teal-300 justify-center"
+        >
+          <Sparkles className="h-4 w-4 mr-2" />
+          Pick from AI Studio library
+        </Button>
+      )}
+
       {/* URL Input */}
       <div className="flex gap-2 mt-3">
         <Input
@@ -396,18 +410,6 @@ function ImageUploadSection({
           <ImagePlus className="h-4 w-4 mr-1" />
           Add
         </Button>
-        {onOpenStudioPicker && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onOpenStudioPicker}
-            className="shrink-0 border-teal-200 text-teal-700 hover:bg-teal-50"
-          >
-            <Sparkles className="h-4 w-4 mr-1" />
-            AI Studio
-          </Button>
-        )}
       </div>
 
       {/* Image Previews */}
