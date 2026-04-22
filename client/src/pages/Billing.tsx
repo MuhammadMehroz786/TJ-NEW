@@ -78,7 +78,6 @@ export function Billing() {
   const [totalPurchased,   setTotalPurchased]   = useState(0);
   const [loading,          setLoading]          = useState(true);
   const [checkoutLoading,  setCheckoutLoading]  = useState(false);
-  const [grantLoading,     setGrantLoading]     = useState(false);
 
   const [selectedTier,  setSelectedTier]  = useState<number | null>(null);
   const [customCredits, setCustomCredits] = useState(100);
@@ -165,22 +164,6 @@ export function Billing() {
         "Failed to start checkout"
       );
       setCheckoutLoading(false);
-    }
-  };
-
-  const handleGrant = async () => {
-    setGrantLoading(true);
-    try {
-      const r = await api.post("/credits/grant");
-      toast.success(`${r.data.granted} credits added to your account`);
-      loadData();
-    } catch (err: unknown) {
-      toast.error(
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        "Failed to add credits"
-      );
-    } finally {
-      setGrantLoading(false);
     }
   };
 
@@ -552,20 +535,6 @@ export function Billing() {
                 </span>
               </div>
 
-              <button
-                onClick={handleGrant}
-                disabled={grantLoading}
-                className="w-full h-10 rounded-lg flex items-center justify-center gap-2 text-sm font-semibold text-white transition-colors mt-2 disabled:opacity-50"
-                style={{ background: grantLoading ? "#374151" : "#2DD4BF" }}
-                onMouseEnter={e => { if (!grantLoading) (e.currentTarget as HTMLButtonElement).style.background = "#14B8A6"; }}
-                onMouseLeave={e => { if (!grantLoading) (e.currentTarget as HTMLButtonElement).style.background = "#2DD4BF"; }}
-              >
-                {grantLoading ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <>+ Add 50 Test Credits</>
-                )}
-              </button>
             </div>
           </div>
 

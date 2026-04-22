@@ -284,51 +284,6 @@ router.post("/verify-session", authenticate, async (req: AuthRequest, res: Respo
   }
 });
 
-// ── POST /api/credits/grant ──────────────────────────────────────────────────
-// Admin-only: grant 50 purchased credits without Stripe (testing/comps).
-// Requires BOTH an env flag (ENABLE_DEV_CREDIT_GRANT) AND the caller's userId
-// to appear in the DEV_CREDIT_GRANT_USER_IDS comma-separated allowlist. This
-// way, even if the env flag is left on in production, an attacker-signed
-// account still cannot self-grant credits.
-router.post("/grant", authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
-  if (process.env.ENABLE_DEV_CREDIT_GRANT !== "true") {
-    res.status(403).json({ error: "Credit granting is disabled", code: "FORBIDDEN" });
-    return;
-  }
-  const allowlist = (process.env.DEV_CREDIT_GRANT_USER_IDS || "")
-    .split(",").map((s) => s.trim()).filter(Boolean);
-  if (allowlist.length === 0 || !allowlist.includes(req.auth!.userId)) {
-    res.status(403).json({ error: "Not authorized", code: "FORBIDDEN" });
-    return;
-  }
-
-  const GRANT_AMOUNT = 50;
-  try {
-    const userId = req.auth!.userId;
-    await prisma.$transaction(async (tx) => {
-      await tx.creditPurchase.create({
-        data: {
-          userId,
-          credits: GRANT_AMOUNT,
-          amount: 0,
-          stripeSessionId: `dev_grant_${Date.now()}_${userId}`,
-          status: "COMPLETED",
-        },
-      });
-      await tx.user.update({
-        where: { id: userId },
-        data: { purchasedCredits: { increment: GRANT_AMOUNT } },
-      });
-    });
-
-    const balance = await getAICredits(prisma, userId);
-    res.json({ granted: GRANT_AMOUNT, balance });
-  } catch (err) {
-    console.error("Grant error:", err);
-    res.status(500).json({ error: "Failed to grant credits", code: "INTERNAL_ERROR" });
-  }
-});
-
 // ── GET /api/credits/usage ───────────────────────────────────────────────────
 router.get("/usage", authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
