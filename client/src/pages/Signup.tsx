@@ -11,8 +11,12 @@ import { ArrowLeft, Mail } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 export function Signup() {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [role, setRole] = useState<"MERCHANT" | "CREATOR" | null>(null);
+  // MVP scope: only MERCHANT signups. The Creator role + its pages still
+  // exist for any already-created creator accounts and for future re-enable,
+  // but new users can no longer pick that path — we start straight on the
+  // account-details step with role hardcoded to MERCHANT.
+  const [step, setStep] = useState<1 | 2 | 3>(2);
+  const [role] = useState<"MERCHANT">("MERCHANT");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,11 +26,6 @@ export function Signup() {
   const { signupStart, signupVerify, signupResend } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
-
-  const handleRoleSelect = (selectedRole: "MERCHANT" | "CREATOR") => {
-    setRole(selectedRole);
-    setStep(2);
-  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -93,62 +92,23 @@ export function Signup() {
       <Card className="border-slate-200/60 shadow-xl shadow-slate-200/50">
         <CardHeader className="text-center pb-2">
           <CardTitle className="text-2xl font-semibold text-slate-900">
-            {step === 1 ? t("signup.roleTitle") : step === 2 ? t("signup.formTitle") : t("signup.otpTitle")}
+            {step === 2 ? t("signup.formTitle") : t("signup.otpTitle")}
           </CardTitle>
           <CardDescription className="text-slate-500">
-            {step === 1
-              ? t("signup.roleSubtitle")
-              : step === 2
-                ? t("signup.formStep", { role: role === "MERCHANT" ? t("signup.merchant") : t("signup.creator") })
-                : t("signup.otpStep", { email })}
+            {step === 2
+              ? t("signup.formStepSimple")
+              : t("signup.otpStep", { email })}
           </CardDescription>
           <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
               className="h-full bg-teal-600 rounded-full transition-all duration-300"
-              style={{ width: step === 1 ? "33%" : step === 2 ? "66%" : "100%" }}
+              style={{ width: step === 2 ? "50%" : "100%" }}
             />
           </div>
         </CardHeader>
         <CardContent>
-          {step === 1 ? (
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => handleRoleSelect("MERCHANT")}
-                className="w-full border-2 border-slate-200 rounded-xl p-5 flex items-center gap-4 hover:border-teal-500 hover:bg-teal-50/50 transition-all text-start"
-              >
-                <div className="w-12 h-12 bg-teal-50 rounded-xl flex items-center justify-center text-2xl shrink-0">
-                  🏪
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">{t("signup.roleMerchantTitle")}</p>
-                  <p className="text-sm text-slate-500 mt-0.5">{t("signup.roleMerchantSubtitle")}</p>
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRoleSelect("CREATOR")}
-                className="w-full border-2 border-slate-200 rounded-xl p-5 flex items-center gap-4 hover:border-teal-500 hover:bg-teal-50/50 transition-all text-start"
-              >
-                <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center text-2xl shrink-0">
-                  🎬
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">{t("signup.roleCreatorTitle")}</p>
-                  <p className="text-sm text-slate-500 mt-0.5">{t("signup.roleCreatorSubtitle")}</p>
-                </div>
-              </button>
-            </div>
-          ) : step === 2 ? (
+          {step === 2 ? (
             <>
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-4 -mt-1"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                {t("common.back")}
-              </button>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">{t("signup.nameLabel")}</Label>

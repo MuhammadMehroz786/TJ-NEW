@@ -44,8 +44,12 @@ router.post("/signup", async (req: AuthRequest, res: Response): Promise<void> =>
       res.status(400).json({ error: "Password must be at least 8 characters", code: "VALIDATION_ERROR" });
       return;
     }
-    if (role && role !== "MERCHANT" && role !== "CREATOR") {
-      res.status(400).json({ error: "Role must be MERCHANT or CREATOR", code: "VALIDATION_ERROR" });
+    // MVP scope: only MERCHANT signups are accepted. Reject creator signup
+    // attempts even if someone posts directly to the API — the frontend
+    // picker has been removed but the DB model still supports the role for
+    // existing accounts and future re-enable.
+    if (role && role !== "MERCHANT") {
+      res.status(400).json({ error: "Creator signups aren't available yet. Please sign up as a Merchant.", code: "CREATOR_SIGNUP_DISABLED" });
       return;
     }
     const email = String(rawEmail).trim().toLowerCase();

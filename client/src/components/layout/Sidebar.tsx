@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Package, Store, Megaphone, Settings, LogOut, ChevronDown, Tag, CreditCard, Sparkles, Wallet, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Package, Store, Settings, LogOut, ChevronDown, Sparkles, Wallet, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useTranslation } from "react-i18next";
 import {
@@ -17,13 +17,13 @@ export function Sidebar() {
   const navigate = useNavigate();
   const { t, i18n } = useTranslation();
 
+  // MVP scope: Advertising / Promo Codes / Sales Attribution are hidden
+  // from navigation. Routes + endpoints are kept in place so nothing breaks
+  // for any existing bookmarks or future work — just removed from the menu.
   const merchantNav = [
     { to: "/", icon: LayoutDashboard, label: t("nav.dashboard") },
     { to: "/products", icon: Package, label: t("nav.products") },
     { to: "/marketplaces", icon: Store, label: t("nav.marketplaces") },
-    { to: "/advertising", icon: Megaphone, label: t("nav.advertising") },
-    { to: "/promo-codes", icon: Tag, label: t("nav.promoCodes") },
-    { to: "/sales", icon: CreditCard, label: t("nav.sales") },
     { to: "/ai-studio", icon: Sparkles, label: t("nav.aiStudio") },
     { to: "/billing", icon: Wallet, label: t("nav.billing") },
     { to: "/settings", icon: Settings, label: t("nav.settings") },

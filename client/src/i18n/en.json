@@ -80,6 +80,7 @@
     "roleSubtitle": "Choose how you'll use TijarFlow",
     "formTitle": "Create your account",
     "formStep": "Step 2 of 3 — {{role}} account",
+    "formStepSimple": "Step 1 of 2 — your details",
     "roleMerchantTitle": "Sell & Advertise",
     "roleMerchantSubtitle": "I'm a store owner or merchant",
     "roleCreatorTitle": "Promote & Earn",

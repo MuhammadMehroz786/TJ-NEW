@@ -80,6 +80,7 @@
     "roleSubtitle": "اختر كيف ستستخدم تجار فلو",
     "formTitle": "أنشئ حسابك",
     "formStep": "الخطوة 2 من 3 — حساب {{role}}",
+    "formStepSimple": "الخطوة 1 من 2 — بياناتك",
     "roleMerchantTitle": "أبيع وأعلن",
     "roleMerchantSubtitle": "أنا صاحب متجر أو تاجر",
     "roleCreatorTitle": "أروّج وأكسب",

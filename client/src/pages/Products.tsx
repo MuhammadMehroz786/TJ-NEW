@@ -1334,13 +1334,6 @@ export function Products() {
                             <Sparkles className="mr-2 h-4 w-4 text-amber-500" />
                             Enhance with AI
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => openAdvertise(product)}
-                            className="cursor-pointer"
-                          >
-                            <Megaphone className="mr-2 h-4 w-4 text-teal-600" />
-                            Advertise
-                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             onClick={() => handleDelete(product.id)}
