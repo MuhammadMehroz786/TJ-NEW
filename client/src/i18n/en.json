@@ -20,6 +20,10 @@
     "ar": "العربية",
     "switch": "Language"
   },
+  "sidebar": {
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "products": "Products",
