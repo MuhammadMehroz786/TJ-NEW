@@ -9,3 +9,5 @@ dist/
 .claude/
 server/storage/
 Context.md
+VPS-SETUP.md
+TEST-PLAN.md
