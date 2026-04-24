@@ -62,8 +62,8 @@ router.put("/password", async (req: AuthRequest, res: Response): Promise<void> =
       return;
     }
 
-    if (newPassword.length < 6) {
-      res.status(400).json({ error: "New password must be at least 6 characters", code: "VALIDATION_ERROR" });
+    if (newPassword.length < 8) {
+      res.status(400).json({ error: "New password must be at least 8 characters", code: "VALIDATION_ERROR" });
       return;
     }
 

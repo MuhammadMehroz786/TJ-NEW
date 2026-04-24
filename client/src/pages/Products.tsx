@@ -275,14 +275,25 @@ function ImageUploadSection({
       const fileArray = Array.from(files).filter((f) => f.type.startsWith("image/"));
       if (fileArray.length === 0) return;
 
-      fileArray.forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (typeof reader.result === "string") {
-            onChange([...images, reader.result]);
-          }
-        };
-        reader.readAsDataURL(file);
+      // Read every file in parallel, then append the results to images[] as one
+      // batch. The previous implementation called onChange([...images, …]) inside
+      // each reader.onload — all N callbacks captured the same stale `images`
+      // at loop time, so only the last-firing one's append survived.
+      Promise.all(
+        fileArray.map(
+          (file) => new Promise<string | null>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              resolve(typeof reader.result === "string" ? reader.result : null);
+            };
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(file);
+          }),
+        ),
+      ).then((dataUrls) => {
+        const added = dataUrls.filter((u): u is string => !!u);
+        if (added.length === 0) return;
+        onChange([...images, ...added]);
       });
     },
     [images, onChange],
@@ -507,7 +518,7 @@ export function Products() {
   const [studioFolderFilter, setStudioFolderFilter] = useState("all");
   const [studioPickerLoading, setStudioPickerLoading] = useState(false);
   const [studioSelected, setStudioSelected] = useState<Set<string>>(new Set());
-  const [, setStudioSearch] = useState("");
+  const [studioSearch, setStudioSearch] = useState("");
 
   // CSV bulk import state
   const [importOpen, setImportOpen] = useState(false);
@@ -807,6 +818,12 @@ export function Products() {
   };
 
   const handleDelete = async (id: string) => {
+    // Confirm before deleting. A simple native confirm() keeps this consistent
+    // with the bulk-delete prompt already in the AI Studio gallery flow — and
+    // avoids adding yet another Dialog to this file.
+    const product = products.find((p) => p.id === id);
+    const label = product ? `"${product.title}"` : "this product";
+    if (!window.confirm(`Delete ${label}? This can't be undone.`)) return;
     try {
       await api.delete(`/products/${id}`);
       toast.success("Product deleted");
@@ -817,6 +834,10 @@ export function Products() {
   };
 
   const handleBulkAction = async (action: string) => {
+    if (action === "delete") {
+      const n = selectedIds.size;
+      if (!window.confirm(`Delete ${n} product${n === 1 ? "" : "s"}? This can't be undone.`)) return;
+    }
     try {
       await api.patch("/products/bulk", { ids: Array.from(selectedIds), action });
       toast.success(`Bulk ${action} completed`);
@@ -1688,26 +1709,51 @@ export function Products() {
             )}
           </div>
 
-          {/* Folder tab bar */}
+          {/* Folder search + tab bar */}
           <div className="px-6 pt-3 pb-0 shrink-0">
+            {/* Search input filters the folder tab list below it. "All Media"
+                always remains pinned at the start so merchants never get stuck
+                when no folder matches their query. */}
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                value={studioSearch}
+                onChange={(e) => setStudioSearch(e.target.value)}
+                placeholder="Search folders..."
+                className="pl-9 h-9 text-sm"
+              />
+            </div>
             <div className="flex items-center gap-2 overflow-x-auto pb-3 scrollbar-hide" style={{ scrollbarWidth: "none" }}>
-              {[{ id: "all", name: "All Media", count: studioImages.length }, ...studioFolders.map((f) => ({ id: f.id, name: f.name, count: f._count.images }))].map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => loadStudioFolder(tab.id)}
-                  className={`shrink-0 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-medium transition-all border ${
-                    studioFolderFilter === tab.id
-                      ? "bg-teal-600 text-white border-teal-600 shadow-sm"
-                      : "bg-white text-slate-600 border-slate-200 hover:border-teal-300 hover:text-teal-700 hover:bg-teal-50"
-                  }`}
-                >
-                  {tab.name}
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-normal ${studioFolderFilter === tab.id ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-400"}`}>
-                    {tab.count}
-                  </span>
-                </button>
-              ))}
+              {(() => {
+                const q = studioSearch.trim().toLowerCase();
+                const matchedFolders = q
+                  ? studioFolders.filter((f) => f.name.toLowerCase().includes(q))
+                  : studioFolders;
+                const tabs = [
+                  { id: "all", name: "All Media", count: studioImages.length },
+                  ...matchedFolders.map((f) => ({ id: f.id, name: f.name, count: f._count.images })),
+                ];
+                return tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => loadStudioFolder(tab.id)}
+                    className={`shrink-0 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-medium transition-all border ${
+                      studioFolderFilter === tab.id
+                        ? "bg-teal-600 text-white border-teal-600 shadow-sm"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-teal-300 hover:text-teal-700 hover:bg-teal-50"
+                    }`}
+                  >
+                    {tab.name}
+                    <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-normal ${studioFolderFilter === tab.id ? "bg-teal-500 text-white" : "bg-slate-100 text-slate-400"}`}>
+                      {tab.count}
+                    </span>
+                  </button>
+                ));
+              })()}
+              {studioSearch.trim() && studioFolders.filter((f) => f.name.toLowerCase().includes(studioSearch.trim().toLowerCase())).length === 0 && (
+                <span className="shrink-0 text-xs text-slate-400 px-2 py-1">No folders match "{studioSearch}"</span>
+              )}
             </div>
             <div className="h-px bg-slate-100" />
           </div>
@@ -1878,7 +1924,7 @@ export function Products() {
 
       {/* CSV Import Dialog */}
       <Dialog open={importOpen} onOpenChange={(open) => { if (!open && !importing) setImportOpen(false); }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileUp className="h-5 w-5 text-teal-600" />
@@ -2210,7 +2256,7 @@ export function Products() {
         open={bulkEnhanceOpen}
         onOpenChange={(open) => { if (!open && !bulkEnhanceRunning) setBulkEnhanceOpen(false); }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-amber-500" />
@@ -2385,7 +2431,7 @@ export function Products() {
           if (!open && !enhanceProductRunning) setEnhanceProduct(null);
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-amber-500" />

@@ -58,8 +58,8 @@ export function Settings() {
       toast.error("Passwords don't match");
       return;
     }
-    if (newPassword.length < 6) {
-      toast.error("Password must be at least 6 characters");
+    if (newPassword.length < 8) {
+      toast.error("Password must be at least 8 characters");
       return;
     }
     setSavingPassword(true);
@@ -145,7 +145,7 @@ export function Settings() {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={8}
                   placeholder={t("settings.newPasswordHint")}
                 />
               </div>
@@ -156,7 +156,7 @@ export function Settings() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={8}
                 />
               </div>
               <Button

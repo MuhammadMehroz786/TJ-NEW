@@ -206,7 +206,7 @@
     "passwordSubtitle": "Change your password",
     "currentPassword": "Current password",
     "newPassword": "New password",
-    "newPasswordHint": "At least 6 characters",
+    "newPasswordHint": "At least 8 characters",
     "changePassword": "Change password",
     "changingPassword": "Updating...",
     "forgotCurrentPrompt": "Forgot your current password?",

@@ -253,10 +253,12 @@ export function AIStudio() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!window.confirm("Delete this image? This can't be undone.")) return;
     try {
       await api.delete(`/ai-studio/images/${id}`);
       setImages((prev) => prev.filter((img) => img.id !== id));
       fetchFolders();
+      toast.success("Image deleted");
     } catch {
       toast.error("Failed to delete image");
     }
@@ -292,6 +294,8 @@ export function AIStudio() {
   };
 
   const handleDeleteFolder = async (id: string) => {
+    const f = folders.find((x) => x.id === id);
+    if (!window.confirm(`Delete folder${f ? ` "${f.name}"` : ""}? Images inside will be unfiled, not deleted.`)) return;
     try {
       await api.delete(`/ai-studio/folders/${id}`);
       setFolders((prev) => prev.filter((f) => f.id !== id));
@@ -745,7 +749,7 @@ export function AIStudio() {
           }
         }}
       >
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{t("aiStudio.preview")}</DialogTitle></DialogHeader>
           {previewImage && (
             <div className="space-y-4">
@@ -811,7 +815,7 @@ export function AIStudio() {
       </Dialog>
 
       <Dialog open={!!renameFolderId} onOpenChange={() => setRenameFolderId(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{t("aiStudio.renameFolder")}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Input value={renameFolderName} onChange={(e) => setRenameFolderName(e.target.value)} />
@@ -824,7 +828,7 @@ export function AIStudio() {
       </Dialog>
 
       <Dialog open={!!newlyEnhanced} onOpenChange={() => setNewlyEnhanced(null)}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Image Enhanced</DialogTitle></DialogHeader>
           {newlyEnhanced && (
             <div className="space-y-3">
@@ -848,7 +852,7 @@ export function AIStudio() {
 
       {/* Bulk Move Dialog */}
       <Dialog open={bulkMoveOpen} onOpenChange={(open) => { if (!open && !bulkActionRunning) setBulkMoveOpen(false); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Move {selectedGalleryIds.size} image{selectedGalleryIds.size === 1 ? "" : "s"} to…</DialogTitle>
           </DialogHeader>
@@ -872,7 +876,7 @@ export function AIStudio() {
 
       {/* Bulk Enhance Dialog */}
       <Dialog open={bulkEnhanceOpen} onOpenChange={(open) => { if (!open && !bulkEnhanceRunning) setBulkEnhanceOpen(false); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-amber-500" />Enhance {selectedGalleryIds.size} image{selectedGalleryIds.size === 1 ? "" : "s"} again</DialogTitle>
           </DialogHeader>
@@ -916,7 +920,7 @@ export function AIStudio() {
 
       {/* Bulk Relabel Dialog */}
       <Dialog open={bulkRelabelOpen} onOpenChange={(open) => { if (!open && !bulkActionRunning) setBulkRelabelOpen(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Relabel {selectedGalleryIds.size} image{selectedGalleryIds.size === 1 ? "" : "s"}</DialogTitle>
           </DialogHeader>
@@ -938,7 +942,7 @@ export function AIStudio() {
 
       {/* Bulk Add to Product Dialog */}
       <Dialog open={bulkAddProductOpen} onOpenChange={(open) => { if (!open && !bulkActionRunning) setBulkAddProductOpen(false); }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add {selectedGalleryIds.size} image{selectedGalleryIds.size === 1 ? "" : "s"} to a product</DialogTitle>
           </DialogHeader>

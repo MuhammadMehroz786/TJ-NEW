@@ -206,7 +206,7 @@
     "passwordSubtitle": "غيّر كلمة مرورك",
     "currentPassword": "كلمة المرور الحالية",
     "newPassword": "كلمة المرور الجديدة",
-    "newPasswordHint": "6 أحرف على الأقل",
+    "newPasswordHint": "8 أحرف على الأقل",
     "changePassword": "تغيير كلمة المرور",
     "changingPassword": "جارٍ التحديث...",
     "forgotCurrentPrompt": "هل نسيت كلمة المرور الحالية؟",
