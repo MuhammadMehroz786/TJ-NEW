@@ -21,28 +21,23 @@ router.get("/ai-credits", async (req: AuthRequest, res: Response): Promise<void>
 });
 
 // PUT /api/user/profile
+// Security: email is the identity + login field. Letting users change it
+// themselves opens a social-engineering takeover vector (attacker gets
+// short-lived session → swaps email → locks original owner out and owns the
+// account permanently). We silently ignore any `email` field the client
+// sends. Admins can still rotate an email via the admin endpoint if needed.
 router.put("/profile", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { name, email } = req.body;
+    const { name } = req.body;
 
-    if (!name && !email) {
-      res.status(400).json({ error: "Name or email is required", code: "VALIDATION_ERROR" });
+    if (typeof name !== "string" || !name.trim()) {
+      res.status(400).json({ error: "Name is required", code: "VALIDATION_ERROR" });
       return;
-    }
-
-    if (email) {
-      const existing = await prisma.user.findFirst({
-        where: { email, NOT: { id: req.auth!.userId } },
-      });
-      if (existing) {
-        res.status(409).json({ error: "Email already in use", code: "CONFLICT" });
-        return;
-      }
     }
 
     const user = await prisma.user.update({
       where: { id: req.auth!.userId },
-      data: { ...(name && { name }), ...(email && { email }) },
+      data: { name: name.trim().slice(0, 80) },
       select: { id: true, email: true, name: true, createdAt: true, updatedAt: true },
     });
 

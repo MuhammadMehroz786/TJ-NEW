@@ -200,6 +200,7 @@
     "profileSubtitle": "Update your personal information",
     "nameLabel": "Full Name",
     "emailLabel": "Email",
+    "emailReadonlyHint": "Email is your login and can't be changed from here. Contact support if you need to update it.",
     "saveProfile": "Save changes",
     "savingProfile": "Saving...",
     "password": "Password",

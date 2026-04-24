@@ -13,7 +13,9 @@ export function Settings() {
   const { user, updateUser } = useAuth();
   const { t } = useTranslation();
   const [name, setName] = useState(user?.name || "");
-  const [email, setEmail] = useState(user?.email || "");
+  // Email stays in sync with the user object but is never editable from this
+  // form — see the readOnly input + server-side silent-ignore below.
+  const email = user?.email || "";
   const [savingProfile, setSavingProfile] = useState(false);
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -26,7 +28,9 @@ export function Settings() {
     e.preventDefault();
     setSavingProfile(true);
     try {
-      const res = await api.put("/user/profile", { name, email });
+      // Email is read-only from this surface (see note on the Email field
+      // below). Only `name` is sent; server silently ignores any email too.
+      const res = await api.put("/user/profile", { name });
       updateUser(res.data.user);
       toast.success("Profile updated");
     } catch (err: unknown) {
@@ -104,9 +108,13 @@ export function Settings() {
                 <Input
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
+                  readOnly
+                  disabled
+                  className="bg-slate-50 cursor-not-allowed"
                 />
+                <p className="text-xs text-slate-500">
+                  {t("settings.emailReadonlyHint")}
+                </p>
               </div>
               <Button
                 type="submit"
