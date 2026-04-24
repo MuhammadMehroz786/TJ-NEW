@@ -152,6 +152,31 @@ function rowsToImportJSON(rows: string[][]): Record<string, string>[] {
   });
 }
 
+// Mirror the server's per-row validation rules so we can surface problems
+// in the preview, not silently skip them at import time. The row number is
+// 1-based and matches what the user sees in Excel (row 1 = header, row 2 =
+// first data row).
+function validateImportRow(row: Record<string, string>, rowNumber: number): string | null {
+  const title = (row.title || "").trim();
+  if (!title) return "Missing title";
+  if (title.length > 255) return "Title too long (max 255 chars)";
+  const priceRaw = (row.price ?? "").toString().trim();
+  if (!priceRaw) return "Missing price";
+  const price = parseFloat(priceRaw);
+  if (!Number.isFinite(price) || price < 0) return "Price must be a non-negative number";
+  const qtyRaw = (row.quantity ?? "").toString().trim();
+  if (qtyRaw) {
+    const qty = parseInt(qtyRaw, 10);
+    if (!Number.isFinite(qty) || qty < 0) return "Quantity must be a non-negative integer";
+  }
+  const statusRaw = (row.status || "").trim().toUpperCase();
+  if (statusRaw && !["DRAFT", "ACTIVE", "ARCHIVED"].includes(statusRaw)) {
+    return `Unknown status "${statusRaw}" (use DRAFT, ACTIVE, or ARCHIVED)`;
+  }
+  void rowNumber;
+  return null;
+}
+
 const CSV_TEMPLATE = "title,price,quantity,sku,status,description,imageUrl,category,vendor,tags\n" +
   "Example Product,99.00,10,SKU-001,DRAFT,\"Soft cotton t-shirt, unisex\",https://example.com/img.jpg,Apparel,Acme,\"summer,cotton\"\n";
 
@@ -523,6 +548,10 @@ export function Products() {
   // CSV bulk import state
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState<Record<string, string>[]>([]);
+  // Preview-time row validation — we compute which rows will be skipped on
+  // import and why, so the merchant sees it BEFORE hitting the Import button.
+  // Each entry: { row: 1-based row number in the CSV, issue: human-readable }.
+  const [importRowIssues, setImportRowIssues] = useState<{ row: number; issue: string }[]>([]);
   const [importFileName, setImportFileName] = useState("");
   const [importError, setImportError] = useState("");
   const [importing, setImporting] = useState(false);
@@ -873,6 +902,7 @@ export function Products() {
   const openImport = () => {
     setImportOpen(true);
     setImportRows([]);
+    setImportRowIssues([]);
     setImportFileName("");
     setImportError("");
     setImportZipFile(null);
@@ -895,36 +925,65 @@ export function Products() {
   };
 
   const handleImportFile = async (file: File) => {
+    // Reset every piece of state for a fresh attempt. On rejection we also
+    // clear the filename so the UI doesn't keep showing "whatever.pdf" next
+    // to the error message (which was confusing merchants into thinking the
+    // bad file was still selected).
     setImportError("");
-    setImportFileName(file.name);
-    if (file.size > 5 * 1024 * 1024) {
-      setImportError("File is too large (max 5 MB)");
-      setImportRows([]);
+    setImportRows([]);
+    setImportRowIssues([]);
+
+    // Validate extension + mime BEFORE reading the bytes. PDFs and other
+    // non-CSV files don't belong in this slot.
+    const isCsvExt = /\.csv$/i.test(file.name);
+    const isCsvMime = file.type === "text/csv" || file.type === "application/vnd.ms-excel" || file.type === "";
+    if (!isCsvExt || !isCsvMime) {
+      setImportFileName("");
+      setImportError(`"${file.name}" isn't a CSV file. Choose a file with a .csv extension.`);
       return;
     }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setImportFileName("");
+      setImportError("File is too large (max 5 MB)");
+      return;
+    }
+
+    // Only commit the filename to state AFTER format + size checks pass, so
+    // rejected files don't leave a stale name visible next to an error.
+    setImportFileName(file.name);
+
     try {
       const text = await file.text();
       const raw = parseCSV(text);
       const parsed = rowsToImportJSON(raw);
       if (parsed.length === 0) {
+        setImportFileName("");
         setImportError("No data rows found. Make sure the first row is the header (title, price, ...).");
-        setImportRows([]);
         return;
       }
       if (parsed.length > 500) {
+        setImportFileName("");
         setImportError(`Too many rows (${parsed.length}). Max 500 per import — split the file.`);
-        setImportRows([]);
         return;
       }
       if (!parsed.some((r) => r.title)) {
+        setImportFileName("");
         setImportError("Couldn't find a 'title' column. Rename your column to 'title' or 'name'.");
-        setImportRows([]);
         return;
       }
+      // Build per-row issue list — row 2 = first data row in Excel terms
+      const issues: { row: number; issue: string }[] = [];
+      parsed.forEach((row, i) => {
+        const rowNumber = i + 2;
+        const err = validateImportRow(row, rowNumber);
+        if (err) issues.push({ row: rowNumber, issue: err });
+      });
       setImportRows(parsed);
+      setImportRowIssues(issues);
     } catch {
+      setImportFileName("");
       setImportError("Couldn't read the file. Make sure it's a valid CSV.");
-      setImportRows([]);
     }
   };
 
@@ -961,10 +1020,18 @@ export function Products() {
         if (photos.invalid.length) lines.push(`${photos.invalid.length} file(s) weren't valid images`);
         toast.warning(lines.join(" · "));
       }
-      setImportOpen(false);
-      setImportRows([]);
-      setImportFileName("");
-      setImportZipFile(null);
+      // If there were per-row server errors, keep the dialog open and surface
+      // them in the same issues list the preview uses — so the user sees
+      // exactly which rows they need to fix, not just a toast count.
+      if (errors.length > 0) {
+        setImportRowIssues(errors.map((e) => ({ row: e.row, issue: e.error })));
+      } else {
+        setImportOpen(false);
+        setImportRows([]);
+        setImportRowIssues([]);
+        setImportFileName("");
+        setImportZipFile(null);
+      }
       fetchProducts();
     } catch (err: unknown) {
       const message =
@@ -1924,7 +1991,7 @@ export function Products() {
 
       {/* CSV Import Dialog */}
       <Dialog open={importOpen} onOpenChange={(open) => { if (!open && !importing) setImportOpen(false); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileUp className="h-5 w-5 text-teal-600" />
@@ -2026,10 +2093,15 @@ export function Products() {
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-slate-700">
                     Preview — {importRows.length} row{importRows.length === 1 ? "" : "s"}
+                    {importRowIssues.length > 0 && (
+                      <span className="ml-2 text-xs text-amber-700">
+                        · {importRowIssues.length} row{importRowIssues.length === 1 ? "" : "s"} will be skipped
+                      </span>
+                    )}
                   </p>
                   <p className="text-xs text-slate-400">Showing first 5</p>
                 </div>
-                <div className="border border-slate-200 rounded-md overflow-hidden">
+                <div className="border border-slate-200 rounded-md overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50">
                       <tr>
@@ -2053,6 +2125,28 @@ export function Products() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            )}
+
+            {importRowIssues.length > 0 && (
+              <div className="space-y-2 border border-amber-200 bg-amber-50/60 rounded-md p-3">
+                <p className="text-sm font-medium text-amber-900">
+                  {importRowIssues.length} row{importRowIssues.length === 1 ? "" : "s"} will be skipped on import
+                </p>
+                <p className="text-xs text-amber-800/80">
+                  Fix these in your spreadsheet and re-upload, or import anyway to keep the good rows.
+                </p>
+                <ul className="text-xs text-amber-900 max-h-40 overflow-y-auto divide-y divide-amber-200/70">
+                  {importRowIssues.slice(0, 50).map(({ row, issue }) => (
+                    <li key={row + issue} className="py-1 flex gap-2">
+                      <span className="font-mono shrink-0 text-amber-700">row {row}</span>
+                      <span>{issue}</span>
+                    </li>
+                  ))}
+                  {importRowIssues.length > 50 && (
+                    <li className="py-1 text-amber-700">…and {importRowIssues.length - 50} more</li>
+                  )}
+                </ul>
               </div>
             )}
 
