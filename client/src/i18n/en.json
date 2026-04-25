@@ -257,7 +257,13 @@
     "sendResetEmail": "Email me a reset link",
     "sendingResetEmail": "Sending...",
     "resetEmailSent": "Reset link sent to {{email}}. Check your inbox.",
-    "resetEmailFailed": "Couldn't send the reset email. Please try again."
+    "resetEmailFailed": "Couldn't send the reset email. Please try again.",
+    "profileUpdated": "Profile updated",
+    "profileUpdateFailed": "Failed to update profile",
+    "passwordsDontMatch": "Passwords don't match",
+    "passwordTooShort": "Password must be at least 8 characters",
+    "passwordUpdated": "Password updated",
+    "passwordUpdateFailed": "Failed to update password"
   },
   "products": {
     "title": "Products",
@@ -285,7 +291,31 @@
     "pushTo": "Push to {{store}}",
     "pushing": "Pushing...",
     "delete": "Delete",
-    "confirm": "Are you sure?"
+    "confirm": "Are you sure?",
+    "form": {
+      "basicInformation": "Basic Information",
+      "pricing": "Pricing",
+      "inventory": "Inventory",
+      "shipping": "Shipping",
+      "organization": "Organization",
+      "media": "Media",
+      "titleLabel": "Title",
+      "descriptionLabel": "Description",
+      "descriptionPlaceholder": "Describe your product in detail...",
+      "tagsLabel": "Tags",
+      "tagsHint": "Press Enter or comma to add a tag",
+      "statusLabel": "Status",
+      "pickFromAiStudio": "Pick from AI Studio library",
+      "mediaHint": "Upload your own photos, add by URL, or pick from your AI Studio library",
+      "dropZone": "Drag & drop images here",
+      "dropZoneHint": "or click to browse files",
+      "dropZoneActive": "Drop images here",
+      "urlPlaceholder": "Or paste image URL and press Enter",
+      "addUrl": "Add",
+      "chooseCsv": "Choose CSV",
+      "chooseZip": "Choose ZIP",
+      "downloadTemplate": "Download template"
+    }
   },
   "toast": {
     "saved": "Saved",

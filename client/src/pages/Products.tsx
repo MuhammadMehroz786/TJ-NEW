@@ -217,6 +217,7 @@ function TagInput({
   tags: string[];
   onChange: (tags: string[]) => void;
 }) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -243,7 +244,7 @@ function TagInput({
 
   return (
     <div className="space-y-2">
-      <Label>Tags</Label>
+      <Label>{t("products.form.tagsLabel")}</Label>
       <div
         onClick={() => inputRef.current?.focus()}
         className="flex flex-wrap items-center gap-1.5 min-h-[40px] rounded-md border border-input bg-background px-3 py-2 cursor-text focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2"
@@ -276,7 +277,7 @@ function TagInput({
           className="flex-1 min-w-[120px] bg-transparent text-sm outline-none placeholder:text-slate-400"
         />
       </div>
-      <p className="text-xs text-slate-400">Press Enter or comma to add a tag</p>
+      <p className="text-xs text-slate-400">{t("products.form.tagsHint")}</p>
     </div>
   );
 }
@@ -290,6 +291,7 @@ function ImageUploadSection({
   onChange: (images: string[]) => void;
   onOpenStudioPicker?: () => void;
 }) {
+  const { t } = useTranslation();
   const [dragging, setDragging] = useState(false);
   const [urlInput, setUrlInput] = useState("");
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -367,10 +369,8 @@ function ImageUploadSection({
 
   return (
     <div>
-      <h3 className="text-sm font-semibold text-slate-900 mb-1">Media</h3>
-      <p className="text-xs text-slate-500 mb-3">
-        Upload your own photos, add by URL, or pick from your AI Studio library
-      </p>
+      <h3 className="text-sm font-semibold text-slate-900 mb-1">{t("products.form.media")}</h3>
+      <p className="text-xs text-slate-500 mb-3">{t("products.form.mediaHint")}</p>
 
       {/* Drop Zone */}
       <div
@@ -404,9 +404,9 @@ function ImageUploadSection({
           </div>
           <div>
             <p className="text-sm font-medium text-slate-700">
-              {dragging ? "Drop images here" : "Drag & drop images here"}
+              {dragging ? t("products.form.dropZoneActive") : t("products.form.dropZone")}
             </p>
-            <p className="text-xs text-slate-400 mt-0.5">or click to browse files</p>
+            <p className="text-xs text-slate-400 mt-0.5">{t("products.form.dropZoneHint")}</p>
           </div>
         </div>
       </div>
@@ -421,7 +421,7 @@ function ImageUploadSection({
           className="w-full mt-3 border-teal-200 bg-teal-50/30 text-teal-700 hover:bg-teal-50 hover:border-teal-300 justify-center"
         >
           <Sparkles className="h-4 w-4 mr-2" />
-          Pick from AI Studio library
+          {t("products.form.pickFromAiStudio")}
         </Button>
       )}
 
@@ -431,7 +431,7 @@ function ImageUploadSection({
           value={urlInput}
           onChange={(e) => setUrlInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addUrl())}
-          placeholder="Or paste image URL and press Enter"
+          placeholder={t("products.form.urlPlaceholder")}
           className="flex-1 text-sm"
         />
         <Button
@@ -1054,6 +1054,14 @@ export function Products() {
   };
 
   const openEnhanceProduct = (product: Product) => {
+    // Defensive: even if a caller forgets the disabled gate on the trigger
+    // button, refuse to open the dialog for a product with no images. Backend
+    // would reject with NO_SOURCE_IMAGE anyway — surface it earlier with a
+    // clearer toast instead of letting the user pick a scene then 400.
+    if (!product.images || product.images.length === 0) {
+      toast.error("This product has no image to enhance. Add an image first.");
+      return;
+    }
     setEnhanceProduct(product);
     setEnhanceProductScene("studio");
     setEnhanceProductSceneText("");
@@ -1081,7 +1089,21 @@ export function Products() {
     }
   };
 
+  // How many of the currently-selected products actually have at least one
+  // image. Used to gate Bulk Enhance — if zero have images we don't even
+  // open the dialog, just toast the user.
+  const selectedWithImagesCount = (() => {
+    if (selectedIds.size === 0) return 0;
+    let n = 0;
+    for (const p of products) if (selectedIds.has(p.id) && p.images?.length) n++;
+    return n;
+  })();
+
   const openBulkEnhance = () => {
+    if (selectedWithImagesCount === 0) {
+      toast.error("None of the selected products have an image to enhance. Add images first.");
+      return;
+    }
     setBulkEnhanceScene("studio");
     setBulkEnhanceSceneText("");
     setBulkEnhanceMode("prepend");
@@ -1158,8 +1180,8 @@ export function Products() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold text-slate-900">{t("products.title")}</h1>
           <p className="text-slate-500 text-sm mt-1">{total} · {t("products.subtitle")}</p>
           <p className={`text-sm mt-1 font-medium ${creditClassName}`}>
@@ -1184,14 +1206,14 @@ export function Products() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <Input
             placeholder={t("products.search")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
+            className="ps-10"
           />
         </div>
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
@@ -1219,11 +1241,11 @@ export function Products() {
 
       {/* Bulk Actions */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 mb-3 p-3 bg-teal-50 rounded-lg border border-teal-200">
+        <div className="flex flex-wrap items-center gap-2 mb-3 p-3 bg-teal-50 rounded-lg border border-teal-200">
           <span className="text-sm font-medium text-teal-800">
             {selectedIds.size} selected
           </span>
-          <div className="flex gap-2 ml-4">
+          <div className="flex flex-wrap gap-2 ms-4">
             <Button size="sm" variant="outline" onClick={() => handleBulkAction("activate")}>
               Set Active
             </Button>
@@ -1247,10 +1269,11 @@ export function Products() {
               variant="outline"
               className="text-amber-700 border-amber-200 bg-white hover:bg-amber-50"
               onClick={openBulkEnhance}
-              disabled={bulkEnhanceRunning || selectedIds.size > 50}
+              disabled={bulkEnhanceRunning || selectedIds.size > 50 || selectedWithImagesCount === 0}
+              title={selectedWithImagesCount === 0 ? "None of the selected products have an image" : undefined}
             >
               <Sparkles className="h-3.5 w-3.5 mr-1.5 text-amber-500" />
-              Enhance with AI ({selectedIds.size})
+              Enhance with AI ({selectedWithImagesCount}{selectedWithImagesCount !== selectedIds.size ? `/${selectedIds.size}` : ""})
             </Button>
             {connections.length > 0 && (
               <div className="h-5 w-px bg-teal-200 mx-1" />
@@ -1294,6 +1317,10 @@ export function Products() {
               </Button>
             </div>
           ) : (
+            // overflow-x-auto so the 9-column table can scroll horizontally
+            // INSIDE the card on narrow viewports, instead of pushing the
+            // whole page wider than the viewport.
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50/50">
@@ -1440,6 +1467,7 @@ export function Products() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -1485,7 +1513,7 @@ export function Products() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Basic Info */}
             <div>
-              <h3 className="text-sm font-semibold text-slate-900 mb-3">Basic Information</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">{t("products.form.basicInformation")}</h3>
               <div className="space-y-3">
                 <div className="grid grid-cols-[1fr_auto] gap-3">
                   <div className="space-y-2">
@@ -1594,7 +1622,7 @@ export function Products() {
 
             {/* Pricing */}
             <div>
-              <h3 className="text-sm font-semibold text-slate-900 mb-3">Pricing</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">{t("products.form.pricing")}</h3>
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-2">
                   <Label>Price *</Label>
@@ -1643,7 +1671,7 @@ export function Products() {
 
             {/* Inventory */}
             <div>
-              <h3 className="text-sm font-semibold text-slate-900 mb-3">Inventory</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">{t("products.form.inventory")}</h3>
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-2">
                   <Label>SKU (Stock Keeping Unit)</Label>
@@ -1678,7 +1706,7 @@ export function Products() {
 
             {/* Shipping */}
             <div>
-              <h3 className="text-sm font-semibold text-slate-900 mb-3">Shipping</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">{t("products.form.shipping")}</h3>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Weight</Label>
@@ -1712,7 +1740,7 @@ export function Products() {
 
             {/* Organization */}
             <div>
-              <h3 className="text-sm font-semibold text-slate-900 mb-3">Organization</h3>
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">{t("products.form.organization")}</h3>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <Label>Product Type</Label>
@@ -1782,12 +1810,12 @@ export function Products() {
                 always remains pinned at the start so merchants never get stuck
                 when no folder matches their query. */}
             <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
                 value={studioSearch}
                 onChange={(e) => setStudioSearch(e.target.value)}
                 placeholder="Search folders..."
-                className="pl-9 h-9 text-sm"
+                className="ps-9 h-9 text-sm"
               />
             </div>
             <div className="flex items-center gap-2 overflow-x-auto pb-3 scrollbar-hide" style={{ scrollbarWidth: "none" }}>

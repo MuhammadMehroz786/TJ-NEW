@@ -32,11 +32,11 @@ export function Settings() {
       // below). Only `name` is sent; server silently ignores any email too.
       const res = await api.put("/user/profile", { name });
       updateUser(res.data.user);
-      toast.success("Profile updated");
+      toast.success(t("settings.profileUpdated"));
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        "Failed to update profile";
+        t("settings.profileUpdateFailed");
       toast.error(message);
     } finally {
       setSavingProfile(false);
@@ -59,24 +59,24 @@ export function Settings() {
   const handlePassword = async (e: FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
-      toast.error("Passwords don't match");
+      toast.error(t("settings.passwordsDontMatch"));
       return;
     }
     if (newPassword.length < 8) {
-      toast.error("Password must be at least 8 characters");
+      toast.error(t("settings.passwordTooShort"));
       return;
     }
     setSavingPassword(true);
     try {
       await api.put("/user/password", { currentPassword, newPassword });
-      toast.success("Password updated");
+      toast.success(t("settings.passwordUpdated"));
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        "Failed to update password";
+        t("settings.passwordUpdateFailed");
       toast.error(message);
     } finally {
       setSavingPassword(false);

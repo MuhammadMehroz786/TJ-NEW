@@ -257,7 +257,13 @@
     "sendResetEmail": "أرسل لي رابط إعادة التعيين",
     "sendingResetEmail": "جارٍ الإرسال...",
     "resetEmailSent": "تم إرسال رابط إعادة التعيين إلى {{email}}. تحقّق من بريدك.",
-    "resetEmailFailed": "تعذّر إرسال البريد. يرجى المحاولة مرة أخرى."
+    "resetEmailFailed": "تعذّر إرسال البريد. يرجى المحاولة مرة أخرى.",
+    "profileUpdated": "تم تحديث الملف الشخصي",
+    "profileUpdateFailed": "تعذّر تحديث الملف الشخصي",
+    "passwordsDontMatch": "كلمتا المرور غير متطابقتين",
+    "passwordTooShort": "يجب أن تتكوّن كلمة المرور من 8 أحرف على الأقل",
+    "passwordUpdated": "تم تحديث كلمة المرور",
+    "passwordUpdateFailed": "تعذّر تحديث كلمة المرور"
   },
   "products": {
     "title": "المنتجات",
@@ -285,7 +291,31 @@
     "pushTo": "دفع إلى {{store}}",
     "pushing": "جارٍ الدفع...",
     "delete": "حذف",
-    "confirm": "هل أنت متأكد؟"
+    "confirm": "هل أنت متأكد؟",
+    "form": {
+      "basicInformation": "المعلومات الأساسية",
+      "pricing": "التسعير",
+      "inventory": "المخزون",
+      "shipping": "الشحن",
+      "organization": "التنظيم",
+      "media": "الوسائط",
+      "titleLabel": "العنوان",
+      "descriptionLabel": "الوصف",
+      "descriptionPlaceholder": "صف منتجك بالتفصيل...",
+      "tagsLabel": "الوسوم",
+      "tagsHint": "اضغط Enter أو فاصلة لإضافة وسم",
+      "statusLabel": "الحالة",
+      "pickFromAiStudio": "اختر من مكتبة استوديو الذكاء الاصطناعي",
+      "mediaHint": "ارفع صورك الخاصة، أو أضف برابط، أو اختر من مكتبة الاستوديو",
+      "dropZone": "اسحب وأفلت الصور هنا",
+      "dropZoneHint": "أو انقر لتصفّح الملفات",
+      "dropZoneActive": "أفلت الصور هنا",
+      "urlPlaceholder": "أو الصق رابط صورة واضغط Enter",
+      "addUrl": "أضف",
+      "chooseCsv": "اختر ملف CSV",
+      "chooseZip": "اختر ملف ZIP",
+      "downloadTemplate": "تحميل القالب"
+    }
   },
   "toast": {
     "saved": "تم الحفظ",

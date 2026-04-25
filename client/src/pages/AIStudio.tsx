@@ -638,8 +638,8 @@ export function AIStudio() {
               <div className="flex items-center gap-3 mt-5 mb-3">
                 <h2 className="text-base font-semibold text-slate-900">{selectedFolderId === "all" ? t("aiStudio.allImages") : folders.find((f) => f.id === selectedFolderId)?.name || "Folder"}</h2>
                 <div className="relative flex-1 max-w-sm">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                  <Input placeholder={t("aiStudio.search")} value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+                  <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input placeholder={t("aiStudio.search")} value={search} onChange={(e) => setSearch(e.target.value)} className="ps-10" />
                 </div>
               </div>
 
@@ -948,12 +948,12 @@ export function AIStudio() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Search className="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
               <Input
                 value={bulkProductQuery}
                 onChange={(e) => { setBulkProductQuery(e.target.value); searchProductsForBulkAdd(e.target.value); }}
                 placeholder="Search your products by title..."
-                className="pl-10"
+                className="ps-10"
               />
             </div>
             <div className="max-h-80 overflow-y-auto border border-slate-200 rounded-md divide-y">
