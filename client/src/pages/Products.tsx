@@ -996,11 +996,14 @@ export function Products() {
         const fd = new FormData();
         fd.append("rows", JSON.stringify(importRows));
         fd.append("zip", importZipFile);
+        // Up to 500 rows + a 100MB ZIP. Default 15s axios timeout was
+        // way too short — bumped to 5 min so big imports complete cleanly.
         res = await api.post("/products/bulk-import", fd, {
           headers: { "Content-Type": "multipart/form-data" },
+          timeout: 300_000,
         });
       } else {
-        res = await api.post("/products/bulk-import", { rows: importRows });
+        res = await api.post("/products/bulk-import", { rows: importRows }, { timeout: 120_000 });
       }
       const { created, errors, total, photos } = res.data as {
         created: number;
@@ -1071,10 +1074,12 @@ export function Products() {
     if (!enhanceProduct) return;
     setEnhanceProductRunning(true);
     try {
+      // Single Gemini enhance call typically 5-30s. Default 15s axios
+      // timeout was occasionally throwing false errors on slow API days.
       const res = await api.post(`/products/${enhanceProduct.id}/enhance`, {
         scene: enhanceProductScene,
         sceneText: enhanceProductSceneText.trim() || undefined,
-      });
+      }, { timeout: 120_000 });
       toast.success("Enhanced image added to this product");
       if (typeof res.data?.remainingCredits === "number") setAiCredits(res.data.remainingCredits);
       setEnhanceProduct(null);
@@ -1123,12 +1128,17 @@ export function Products() {
     // single-enhance endpoint.
     const toastId = toast.loading(`Enhancing ${ids.length} product(s)... This may take a few minutes.`);
     try {
+      // Server processes in parallel but each Gemini call is 5-30s and we
+      // batch up to 50. Default 15s axios timeout was firing the catch
+      // BEFORE the server finished, even though the work succeeded — Ashhad
+      // saw a red "Bulk enhancement failed" toast on a successful run.
+      // Allow up to 10 minutes for big batches.
       const res = await api.post("/products/bulk-enhance", {
         productIds: ids,
         scene: bulkEnhanceScene,
         mode: bulkEnhanceMode,
         sceneText: bulkEnhanceSceneText.trim() || undefined,
-      });
+      }, { timeout: 600_000 });
       const { succeeded, failed, remainingCredits } = res.data as {
         succeeded: { productId: string }[];
         failed: { productId: string; error: string }[];
@@ -1150,9 +1160,15 @@ export function Products() {
       fetchProducts();
     } catch (err: unknown) {
       toast.dismiss(toastId);
-      const message =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        "Bulk enhancement failed";
+      const e = err as { response?: { data?: { error?: string } }; code?: string };
+      // Distinguish timeout (server may still be working) from real failure.
+      // Refreshing pulls the products that DID get enhanced.
+      let message: string;
+      if (e?.code === "ECONNABORTED" || /timeout/i.test(String(e))) {
+        message = "Still working on it — the request is taking longer than expected. Refresh in a minute to see how many enhanced.";
+      } else {
+        message = e?.response?.data?.error || "Bulk enhancement failed";
+      }
       toast.error(message);
     } finally {
       setBulkEnhanceRunning(false);

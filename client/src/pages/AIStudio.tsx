@@ -422,7 +422,7 @@ export function AIStudio() {
         scene: bulkEnhanceScene,
         sceneText: bulkEnhanceSceneText.trim() || undefined,
         folderId: selectedFolderId === "all" ? null : selectedFolderId,
-      });
+      }, { timeout: 600_000 });
       const { succeeded, failed, remainingCredits } = res.data as {
         succeeded: { sourceId: string; newId: string }[];
         failed: { sourceId: string; error: string }[];
