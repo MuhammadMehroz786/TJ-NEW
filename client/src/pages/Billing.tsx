@@ -11,6 +11,7 @@ import {
   Minus,
   Plus,
   ChevronRight,
+  ChevronLeft,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -521,20 +522,26 @@ export function Billing() {
               <button
                 onClick={handleCheckout}
                 disabled={checkoutLoading || selectedCredits === 0}
-                className="w-full h-10 rounded-lg flex items-center justify-center gap-2 text-sm font-semibold text-white transition-colors mt-1 disabled:opacity-50"
+                className="w-full h-10 rounded-lg flex items-center gap-2 px-3 text-sm font-semibold text-white transition-colors mt-1 disabled:opacity-50"
                 style={{ background: checkoutLoading || selectedCredits === 0 ? "#374151" : "#0D9488" }}
                 onMouseEnter={e => { if (!checkoutLoading && selectedCredits > 0) (e.currentTarget as HTMLButtonElement).style.background = "#0F766E"; }}
                 onMouseLeave={e => { if (!checkoutLoading && selectedCredits > 0) (e.currentTarget as HTMLButtonElement).style.background = "#0D9488"; }}
               >
                 {checkoutLoading ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <RefreshCw className="h-4 w-4 animate-spin mx-auto" />
                 ) : (
                   <>
                     <div className="w-5 h-5 bg-white rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0" style={{ color: "#0D9488" }}>
                       S
                     </div>
-                    {t("billing.checkout", { amount: computedPrice.toFixed(2) })}
-                    <ChevronRight className="h-4 w-4 ml-auto" />
+                    <span className="flex-1 text-center">
+                      {t("billing.checkout", { amount: computedPrice.toFixed(2) })}
+                    </span>
+                    {i18n.language === "ar" ? (
+                      <ChevronLeft className="h-4 w-4 flex-shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 flex-shrink-0" />
+                    )}
                   </>
                 )}
               </button>
