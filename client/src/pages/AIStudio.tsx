@@ -38,6 +38,14 @@ const backgroundOptions = [
   { value: "gradient", label: "Gradient" },
 ];
 
+// Map a stored background string (preset slug or free-form relabel text) to
+// the human-readable name shown under each gallery tile.
+function formatBackgroundLabel(raw: string): string {
+  if (!raw) return "";
+  const preset = backgroundOptions.find((o) => o.value === raw);
+  return preset ? preset.label : raw;
+}
+
 export function AIStudio() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -713,19 +721,29 @@ export function AIStudio() {
                         <button onClick={() => setPreviewImage(item)} className="w-full"><img src={item.imageUrl} alt="Enhanced product" className="w-full h-44 object-cover bg-slate-50" /></button>
                         <button onClick={() => handleDelete(item.id)} className="absolute top-2 right-2 h-7 w-7 rounded-full bg-black/70 text-white flex items-center justify-center"><X className="h-4 w-4" /></button>
                       </div>
-                      <div className="p-2.5 flex items-center justify-between">
-                        <p className="text-xs text-slate-500">{new Date(item.createdAt).toLocaleDateString()}</p>
-                        <div className="flex items-center gap-1">
-                          <a href={item.imageUrl} download className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center hover:bg-slate-50"><Download className="h-4 w-4 text-slate-600" /></a>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center hover:bg-slate-50"><Plus className="h-4 w-4 text-slate-600" /></button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem onClick={() => handleMoveImageToFolder(item.id, null)}><Check className="mr-2 h-4 w-4" />Remove from folder</DropdownMenuItem>
-                              {folders.map((folder) => <DropdownMenuItem key={folder.id} onClick={() => handleMoveImageToFolder(item.id, folder.id)}><FolderPlus className="mr-2 h-4 w-4" />{folder.name}</DropdownMenuItem>)}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                      <div className="p-2.5 space-y-1.5">
+                        {item.background && (
+                          <p
+                            className="text-xs font-medium text-slate-700 truncate"
+                            title={item.background}
+                          >
+                            {formatBackgroundLabel(item.background)}
+                          </p>
+                        )}
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-slate-500">{new Date(item.createdAt).toLocaleDateString()}</p>
+                          <div className="flex items-center gap-1">
+                            <a href={item.imageUrl} download className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center hover:bg-slate-50"><Download className="h-4 w-4 text-slate-600" /></a>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button className="h-7 w-7 rounded border border-slate-200 flex items-center justify-center hover:bg-slate-50"><Plus className="h-4 w-4 text-slate-600" /></button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem onClick={() => handleMoveImageToFolder(item.id, null)}><Check className="mr-2 h-4 w-4" />Remove from folder</DropdownMenuItem>
+                                {folders.map((folder) => <DropdownMenuItem key={folder.id} onClick={() => handleMoveImageToFolder(item.id, folder.id)}><FolderPlus className="mr-2 h-4 w-4" />{folder.name}</DropdownMenuItem>)}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </div>
                       </div>
                     </div>

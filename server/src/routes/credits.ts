@@ -24,11 +24,16 @@ function getStripe() {
 }
 
 // ── Pricing tiers ────────────────────────────────────────────────────────────
-const PRICING_TIERS: { credits: number; priceUsd: number; label: string; tag?: string }[] = [
-  { credits: 50,  priceUsd: 4.99,  label: "Starter" },
-  { credits: 100, priceUsd: 8.99,  label: "Growth",  tag: "Save 10%" },
-  { credits: 250, priceUsd: 19.99, label: "Pro",     tag: "Save 20%" },
-  { credits: 500, priceUsd: 34.99, label: "Scale",   tag: "Save 30%" },
+// `key` is the stable identifier the client uses to look up an i18n label
+// (billing.tier.starter, .growth, .pro, .scale). `label` is the English
+// fallback rendered when the client can't find a translation.
+// `discountPct` lets the client format the discount badge per locale instead
+// of receiving a pre-formatted "Save 10%" string.
+const PRICING_TIERS: { key: "starter" | "growth" | "pro" | "scale"; credits: number; priceUsd: number; label: string; tag?: string; discountPct?: number }[] = [
+  { key: "starter", credits: 50,  priceUsd: 4.99,  label: "Starter" },
+  { key: "growth",  credits: 100, priceUsd: 8.99,  label: "Growth",  tag: "Save 10%", discountPct: 10 },
+  { key: "pro",     credits: 250, priceUsd: 19.99, label: "Pro",     tag: "Save 20%", discountPct: 20 },
+  { key: "scale",   credits: 500, priceUsd: 34.99, label: "Scale",   tag: "Save 30%", discountPct: 30 },
 ];
 const CUSTOM_PRICE_PER_CREDIT = 0.10; // $0.10 per credit for custom amounts
 

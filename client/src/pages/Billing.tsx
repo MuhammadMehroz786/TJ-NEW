@@ -29,10 +29,12 @@ interface CreditBalance {
 }
 
 interface Tier {
+  key?: "starter" | "growth" | "pro" | "scale";
   credits: number;
   priceUsd: number;
-  label: string;
-  tag?: string;
+  label: string;          // English fallback if key is missing
+  tag?: string;           // legacy, replaced by discountPct on the client
+  discountPct?: number;
 }
 
 interface CreditPurchase {
@@ -55,10 +57,10 @@ function daysUntil(iso: string) {
 const WEEKLY_MAX = 30;
 const CUSTOM_PRICE_PER_CREDIT = 0.1;
 
-const statusConfig: Record<CreditPurchase["status"], { label: string; bg: string; text: string }> = {
-  COMPLETED: { label: "Completed", bg: "#F0FDF4", text: "#15803D" },
-  PENDING:   { label: "Pending",   bg: "#FFFBEB", text: "#B45309" },
-  REFUNDED:  { label: "Refunded",  bg: "#F8FAFC", text: "#64748B" },
+const statusStyle: Record<CreditPurchase["status"], { bg: string; text: string; key: string }> = {
+  COMPLETED: { bg: "#F0FDF4", text: "#15803D", key: "billing.statusCompleted" },
+  PENDING:   { bg: "#FFFBEB", text: "#B45309", key: "billing.statusPending" },
+  REFUNDED:  { bg: "#F8FAFC", text: "#64748B", key: "billing.statusRefunded" },
 };
 
 // Custom card shadow matching the design spec
@@ -67,7 +69,7 @@ const cardShadow = "0 10px 15px -3px rgba(15, 23, 42, 0.08)";
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function Billing() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -264,7 +266,7 @@ export function Billing() {
             </div>
             <p className="text-4xl font-bold text-white leading-none">
               {balance?.totalCredits ?? 0}
-              <span className="text-base font-normal ml-2" style={{ color: "#94A3B8" }}>Cr.</span>
+              <span className="text-base font-normal ms-2" style={{ color: "#94A3B8" }}>{t("billing.creditsAbbr")}</span>
             </p>
           </div>
 
@@ -272,13 +274,19 @@ export function Billing() {
           <Card className="border-slate-200" style={{ boxShadow: cardShadow }}>
             <CardHeader className="p-4 pb-2">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-semibold text-slate-900">Usage · Last 7 Days</CardTitle>
-                <span className="text-[11px] text-slate-400 font-medium">AI Enhancements</span>
+                <CardTitle className="text-sm font-semibold text-slate-900">{t("billing.usageLast7")}</CardTitle>
+                <span className="text-[11px] text-slate-400 font-medium">{t("billing.aiEnhancements")}</span>
               </div>
             </CardHeader>
             <CardContent className="p-4 pt-2">
               <div className="flex items-end justify-between gap-1 h-20">
-                {(usage.length > 0 ? usage : Array.from({ length: 7 }, (_, i) => ({ day: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][i], count: 0 }))).map((item, i) => (
+                {(usage.length > 0 ? usage : Array.from({ length: 7 }, (_, i) => ({ day: ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][i], count: 0 }))).map((item, i) => {
+                  // Day names come from the server as English short forms
+                  // ("Sun", "Mon"…). Map to the i18n weekday block so they
+                  // render in Arabic when the language is set to AR.
+                  const dayKey = (item.day || "").slice(0, 3).toLowerCase();
+                  const dayLabel = t(`billing.weekday.${dayKey}` as never, { defaultValue: item.day });
+                  return (
                   <div key={i} className="flex-1 flex flex-col items-center gap-1 group h-full justify-end">
                     <div className="relative w-full flex justify-center">
                       {item.count > 0 && (
@@ -294,18 +302,19 @@ export function Billing() {
                         }}
                       />
                     </div>
-                    <span className="text-[10px] text-slate-400">{item.day}</span>
+                    <span className="text-[10px] text-slate-400">{dayLabel}</span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
 
           {/* Info note */}
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <p className="text-xs font-semibold text-amber-800 mb-1">How credits work</p>
+            <p className="text-xs font-semibold text-amber-800 mb-1">{t("billing.howItWorksTitle")}</p>
             <p className="text-xs text-amber-700 leading-relaxed">
-              30 free monthly credits reset on the 1st of each month. Purchased credits activate when monthly ones run out and never expire.
+              {t("billing.howItWorksBody")}
             </p>
           </div>
         </div>
@@ -313,8 +322,8 @@ export function Billing() {
         {/* ══════════════ MIDDLE PANEL ══════════════ */}
         <Card className="border-slate-200" style={{ boxShadow: cardShadow }}>
           <CardHeader className="p-5 pb-4 border-b border-slate-100">
-            <CardTitle className="text-base font-semibold text-slate-900">Choose a Plan</CardTitle>
-            <p className="text-sm text-slate-500 mt-0.5">One-time credit packs · no subscription</p>
+            <CardTitle className="text-base font-semibold text-slate-900">{t("billing.choosePlan")}</CardTitle>
+            <p className="text-sm text-slate-500 mt-0.5">{t("billing.choosePlanSubtitle")}</p>
           </CardHeader>
           <CardContent className="p-5 space-y-4">
 
@@ -333,23 +342,28 @@ export function Billing() {
                     }}
                   >
                     <div className="flex items-start justify-between mb-2">
-                      <p className="text-xs font-semibold text-slate-700">{tier.label}</p>
-                      {tier.tag && (
+                      {/* Tier name comes from the server as a translation key
+                          (starter/growth/pro/scale). Fall back to the English
+                          label if the key isn't present (older API responses). */}
+                      <p className="text-xs font-semibold text-slate-700">
+                        {tier.key ? t(`billing.tier.${tier.key}` as never, { defaultValue: tier.label }) : tier.label}
+                      </p>
+                      {(tier.discountPct || tier.tag) && (
                         <span
                           className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full text-white"
                           style={{ background: "#0D9488" }}
                         >
-                          {tier.tag}
+                          {tier.discountPct ? t("billing.savePct", { pct: tier.discountPct }) : tier.tag}
                         </span>
                       )}
                     </div>
 
                     <p className="text-xl font-bold text-slate-900">${tier.priceUsd.toFixed(2)}</p>
-                    <p className="text-[11px] text-slate-500 mt-0.5">{tier.credits} credits</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">{t("billing.tierCredits", { n: tier.credits })}</p>
 
                     {/* Features (compact) */}
                     <div className="mt-2.5 space-y-1">
-                      {["Never expire", "All AI features"].map((f, fi) => (
+                      {[t("billing.tierFeatureNeverExpire"), t("billing.tierFeatureAllAi")].map((f, fi) => (
                         <div key={fi} className="flex items-center gap-1.5">
                           <CheckCircle2
                             className="h-3 w-3 flex-shrink-0"
@@ -366,24 +380,24 @@ export function Billing() {
 
             {/* ── Custom Plan Builder ── */}
             <div>
-              <p className="text-sm font-semibold text-slate-900 mb-2">Custom Plan Builder</p>
+              <p className="text-sm font-semibold text-slate-900 mb-2">{t("billing.customPlanBuilder")}</p>
               <div className="rounded-xl border border-slate-200 p-4 bg-slate-50">
 
                 {/* Header row: title + amount/pricing */}
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <p className="text-sm font-medium text-slate-800">Customize Your Credit Pack</p>
-                    <p className="text-xs text-slate-500 mt-0.5">Credit number</p>
+                    <p className="text-sm font-medium text-slate-800">{t("billing.customPlanCardTitle")}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{t("billing.customCreditNumber")}</p>
                   </div>
-                  <div className="flex items-center gap-4 text-right">
+                  <div className="flex items-center gap-4 text-end">
                     <div>
-                      <p className="text-[11px] text-slate-400">Amount</p>
+                      <p className="text-[11px] text-slate-400">{t("billing.customAmount")}</p>
                       <p className="text-sm font-bold" style={{ color: "#0D9488" }}>
                         ${isCustom ? computedPrice.toFixed(2) : (tiers.find(t => t.credits === selectedTier)?.priceUsd ?? 0).toFixed(2)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[11px] text-slate-400">Pricing</p>
+                      <p className="text-[11px] text-slate-400">{t("billing.customPricing")}</p>
                       <p className="text-sm font-semibold text-slate-700">
                         ${isCustom ? CUSTOM_PRICE_PER_CREDIT.toFixed(3) : selectedTier ? ((tiers.find(t => t.credits === selectedTier)?.priceUsd ?? 0) / (selectedTier || 1)).toFixed(3) : "—"}
                       </p>
@@ -408,7 +422,7 @@ export function Billing() {
                       color: isCustom ? "#0F766E" : "#334155",
                     }}
                   >
-                    {isCustom ? customCredits : (selectedTier ?? "—")} Cr.
+                    {isCustom ? customCredits : (selectedTier ?? "—")} {t("billing.creditsAbbr")}
                   </div>
 
                   <button
@@ -473,13 +487,13 @@ export function Billing() {
             {/* Rows */}
             <div className="px-4 py-4 space-y-2.5">
               <div className="flex justify-between text-sm">
-                <span style={{ color: "#94A3B8" }}>Credits Bundle</span>
+                <span style={{ color: "#94A3B8" }}>{t("billing.orderCreditsBundle")}</span>
                 <span className="font-medium text-white">
-                  {selectedCredits > 0 ? `${selectedCredits} Cr.` : "—"}
+                  {selectedCredits > 0 ? `${selectedCredits} ${t("billing.creditsAbbr")}` : "—"}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span style={{ color: "#94A3B8" }}>Unit Price</span>
+                <span style={{ color: "#94A3B8" }}>{t("billing.orderUnitPrice")}</span>
                 <span className="font-medium text-white">
                   {selectedCredits > 0 ? `$${unitPrice.toFixed(3)}` : "—"}
                 </span>
@@ -487,17 +501,17 @@ export function Billing() {
 
               <div className="pt-2.5" style={{ borderTop: "1px solid #4A5568" }}>
                 <div className="flex justify-between text-sm mb-2">
-                  <span style={{ color: "#94A3B8" }}>Subtotal</span>
+                  <span style={{ color: "#94A3B8" }}>{t("billing.orderSubtotal")}</span>
                   <span className="font-medium text-white">${computedPrice.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span style={{ color: "#94A3B8" }}>Processing Fee</span>
+                  <span style={{ color: "#94A3B8" }}>{t("billing.processingFee")}</span>
                   <span style={{ color: "#64748B" }}>$0.00</span>
                 </div>
               </div>
 
               <div className="flex justify-between items-center pt-2.5" style={{ borderTop: "1px solid #4A5568" }}>
-                <span className="text-sm font-semibold text-white">Total</span>
+                <span className="text-sm font-semibold text-white">{t("billing.orderTotal")}</span>
                 <span className="text-xl font-bold" style={{ color: "#2DD4BF" }}>
                   ${computedPrice.toFixed(2)}
                 </span>
@@ -551,7 +565,7 @@ export function Billing() {
                 <p className="text-sm font-semibold text-slate-900">{t("billing.recent")}</p>
               </div>
               {totalPurchased > 0 && (
-                <Badge variant="secondary" className="text-xs">{totalPurchased} Cr. total</Badge>
+                <Badge variant="secondary" className="text-xs">{t("billing.totalSuffix", { count: totalPurchased })}</Badge>
               )}
             </div>
 
@@ -561,7 +575,12 @@ export function Billing() {
                 className="grid grid-cols-4 px-4 py-2"
                 style={{ borderBottom: "1px solid #E2E8F0" }}
               >
-                {["Date", "Plan", "Credits", "Status"].map(h => (
+                {[
+                  t("billing.tableDate"),
+                  t("billing.tablePlan"),
+                  t("billing.tableCredits"),
+                  t("billing.tableStatus"),
+                ].map(h => (
                   <span
                     key={h}
                     className="text-[11px] font-semibold uppercase"
@@ -577,8 +596,12 @@ export function Billing() {
             {history.length > 0 ? (
               <div>
                 {history.slice(0, 6).map(h => {
-                  const tierLabel = tiers.find(t => t.credits === h.credits)?.label ?? "Custom";
-                  const sc = statusConfig[h.status];
+                  const tierMatch = tiers.find(tt => tt.credits === h.credits);
+                  const tierLabel = tierMatch?.key
+                    ? t(`billing.tier.${tierMatch.key}` as never, { defaultValue: tierMatch.label })
+                    : (tierMatch?.label ?? t("billing.customTier"));
+                  const sc = statusStyle[h.status];
+                  const localeForDate = i18n.language === "ar" ? "ar-SA" : "en-US";
                   return (
                     <div
                       key={h.id}
@@ -586,7 +609,7 @@ export function Billing() {
                       style={{ borderBottom: "1px solid #F1F5F9" }}
                     >
                       <span className="text-[11px] text-slate-500">
-                        {new Date(h.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        {new Date(h.createdAt).toLocaleDateString(localeForDate, { month: "short", day: "numeric" })}
                       </span>
                       <span className="text-[11px] font-medium text-slate-700">{tierLabel}</span>
                       <span className="text-[11px] font-semibold" style={{ color: "#0D9488" }}>+{h.credits}</span>
@@ -594,7 +617,7 @@ export function Billing() {
                         className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full w-fit"
                         style={{ background: sc.bg, color: sc.text }}
                       >
-                        {sc.label}
+                        {t(sc.key as never)}
                       </span>
                     </div>
                   );
@@ -609,8 +632,8 @@ export function Billing() {
                   <Wallet className="h-5 w-5" style={{ color: "#CBD5E1" }} />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-slate-700">No recent transactions yet</p>
-                  <p className="text-xs text-slate-400 mt-1">Select a plan to get started</p>
+                  <p className="text-sm font-medium text-slate-700">{t("billing.noRecent")}</p>
+                  <p className="text-xs text-slate-400 mt-1">{t("billing.noRecentSub")}</p>
                 </div>
               </div>
             )}
