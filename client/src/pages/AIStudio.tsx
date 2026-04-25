@@ -401,18 +401,44 @@ export function AIStudio() {
     const toastId = toast.loading(`Preparing ZIP with ${ids.length} image(s)...`);
     try {
       // responseType: 'blob' so axios doesn't try to parse the bytes as JSON
-      const res = await api.post("/ai-studio/images/download-zip", { ids }, { responseType: "blob" });
+      // 5-min timeout so large galleries don't hit axios' default 0/15s
+      const res = await api.post(
+        "/ai-studio/images/download-zip",
+        { ids },
+        { responseType: "blob", timeout: 300_000 },
+      );
       const blob = new Blob([res.data], { type: "application/zip" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `tijarflow-ai-studio-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.style.display = "none";
+      // Firefox / Safari require the anchor to be in the DOM before .click()
+      // fires a real download — otherwise it's a silent no-op.
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      // Defer revoke so the browser has time to start the download stream.
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 0);
       toast.dismiss(toastId);
       toast.success(`Downloaded ${ids.length} image(s)`);
-    } catch {
+    } catch (err: unknown) {
       toast.dismiss(toastId);
+      // If the server returned JSON-as-blob (error path), try to parse it for
+      // a real message instead of the generic toast.
+      const e = err as { response?: { data?: Blob }; message?: string };
+      if (e?.response?.data instanceof Blob) {
+        try {
+          const txt = await e.response.data.text();
+          const json = JSON.parse(txt);
+          toast.error(json.error || "ZIP download failed");
+          return;
+        } catch {
+          // fall through to generic toast
+        }
+      }
       toast.error("ZIP download failed");
     } finally {
       setBulkActionRunning(false);
