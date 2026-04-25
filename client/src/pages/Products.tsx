@@ -575,6 +575,11 @@ export function Products() {
   const [bulkEnhanceScene, setBulkEnhanceScene] = useState("studio");
   const [bulkEnhanceSceneText, setBulkEnhanceSceneText] = useState("");
   const [bulkEnhanceMode, setBulkEnhanceMode] = useState<"prepend" | "overwrite" | "new">("prepend");
+  // Per Ashhad: default OFF so the merchant doesn't accidentally burn N×
+  // credits on a 50-product batch. When ON, every image of every selected
+  // product is enhanced (1 credit each) and the dialog's cost label shows
+  // the exact total instead of "up to N".
+  const [bulkEnhanceAllImages, setBulkEnhanceAllImages] = useState(false);
   const [bulkEnhanceRunning, setBulkEnhanceRunning] = useState(false);
   const [bulkEnhanceProgress, setBulkEnhanceProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -1104,6 +1109,16 @@ export function Products() {
     return n;
   })();
 
+  // Total image count across selected products with at least one image.
+  // Used to show the dynamic credit cost ("11 Credits — All images") when
+  // the merchant toggles "Enhance all images per product" in the bulk dialog.
+  const selectedTotalImagesCount = (() => {
+    if (selectedIds.size === 0) return 0;
+    let n = 0;
+    for (const p of products) if (selectedIds.has(p.id)) n += p.images?.length ?? 0;
+    return n;
+  })();
+
   const openBulkEnhance = () => {
     if (selectedWithImagesCount === 0) {
       toast.error("None of the selected products have an image to enhance. Add images first.");
@@ -1112,6 +1127,7 @@ export function Products() {
     setBulkEnhanceScene("studio");
     setBulkEnhanceSceneText("");
     setBulkEnhanceMode("prepend");
+    setBulkEnhanceAllImages(false);
     setBulkEnhanceProgress(null);
     setBulkEnhanceOpen(true);
   };
@@ -1138,6 +1154,7 @@ export function Products() {
         scene: bulkEnhanceScene,
         mode: bulkEnhanceMode,
         sceneText: bulkEnhanceSceneText.trim() || undefined,
+        allImages: bulkEnhanceAllImages,
       }, { timeout: 600_000 });
       const { succeeded, failed, remainingCredits } = res.data as {
         succeeded: { productId: string }[];
@@ -1183,12 +1200,25 @@ export function Products() {
     setSelectedIds(next);
   };
 
+  // True if every product CURRENTLY ON SCREEN is selected. Selection is
+  // tracked across all pages — paginating no longer wipes prior selections.
+  const allOnPageSelected = products.length > 0 && products.every((p) => selectedIds.has(p.id));
+  const someOnPageSelected = products.some((p) => selectedIds.has(p.id));
+
   const toggleAll = () => {
-    if (selectedIds.size === products.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(products.map((p) => p.id)));
-    }
+    // Toggle just THIS page in/out of the selection set without disturbing
+    // selections from other pages. Previously this wiped the entire set and
+    // replaced it with the current page, which surprised users who'd
+    // selected products on page 1 and came back to find them gone.
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        for (const p of products) next.delete(p.id);
+      } else {
+        for (const p of products) next.add(p.id);
+      }
+      return next;
+    });
   };
 
   const totalPages = Math.ceil(total / pageSize);
@@ -1343,7 +1373,11 @@ export function Products() {
                   <TableHead className="w-12">
                     <input
                       type="checkbox"
-                      checked={selectedIds.size === products.length && products.length > 0}
+                      checked={allOnPageSelected}
+                      // Indeterminate (the dash icon) when some-but-not-all of
+                      // this page is selected. Lets the merchant see at a
+                      // glance that selections exist on other pages too.
+                      ref={(el) => { if (el) el.indeterminate = !allOnPageSelected && someOnPageSelected; }}
                       onChange={toggleAll}
                       className="rounded border-slate-300"
                     />
@@ -2497,11 +2531,37 @@ export function Products() {
               </p>
             </div>
 
+            {/* Per-product image scope toggle. Default OFF (cover-only,
+                1 credit/product) so big batches don't accidentally drain
+                10x more credits than the merchant expected. */}
+            <label className="flex items-start gap-3 p-3 rounded-md border border-slate-200 hover:bg-slate-50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={bulkEnhanceAllImages}
+                onChange={(e) => setBulkEnhanceAllImages(e.target.checked)}
+                className="mt-0.5 rounded border-slate-300"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-800">Enhance all images per product</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Off: only the cover image is enhanced (1 credit per product).
+                  On: every image of every selected product is enhanced (1 credit each).
+                </p>
+              </div>
+            </label>
+
             <div className="p-3 bg-slate-50 rounded-md text-sm space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-slate-600">Credit cost</span>
                 <span className="font-medium text-slate-900">
-                  {selectedIds.size} credit{selectedIds.size === 1 ? "" : "s"} (1 per product)
+                  {(() => {
+                    // Cover-only mode = 1 credit per product (= number of selected
+                    // products that actually have an image).
+                    // All-images mode = sum of every selected product's image count.
+                    const credits = bulkEnhanceAllImages ? selectedTotalImagesCount : selectedWithImagesCount;
+                    const label = bulkEnhanceAllImages ? "All images" : "Cover only";
+                    return `${credits} credit${credits === 1 ? "" : "s"} (${label})`;
+                  })()}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -2510,11 +2570,17 @@ export function Products() {
                   {aiCredits ?? "—"}
                 </span>
               </div>
-              {aiCredits !== null && aiCredits < selectedIds.size && (
-                <p className="text-xs text-amber-700 pt-1">
-                  Not enough credits for all {selectedIds.size} — the first {aiCredits} will be enhanced, the rest skipped.
-                </p>
-              )}
+              {(() => {
+                const need = bulkEnhanceAllImages ? selectedTotalImagesCount : selectedWithImagesCount;
+                if (aiCredits !== null && aiCredits < need) {
+                  return (
+                    <p className="text-xs text-amber-700 pt-1">
+                      Not enough credits for {need} — the first {aiCredits} will be enhanced, the rest skipped.
+                    </p>
+                  );
+                }
+                return null;
+              })()}
             </div>
 
             {bulkEnhanceProgress && (

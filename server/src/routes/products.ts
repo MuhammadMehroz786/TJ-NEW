@@ -651,7 +651,7 @@ const BULK_ENHANCE_MAX_IDS = 50;
 
 router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const body = req.body as { productIds?: unknown; scene?: unknown; mode?: unknown; sceneText?: unknown };
+    const body = req.body as { productIds?: unknown; scene?: unknown; mode?: unknown; sceneText?: unknown; allImages?: unknown };
     const ids = Array.isArray(body.productIds)
       ? body.productIds.filter((x): x is string => typeof x === "string" && x.length > 0)
       : [];
@@ -659,6 +659,11 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
     const mode: "prepend" | "overwrite" | "new" =
       modeRaw === "overwrite" || modeRaw === "new" ? modeRaw : "prepend";
     const sceneText = typeof body.sceneText === "string" && body.sceneText.trim() ? body.sceneText.trim() : undefined;
+    // When true, every image on the product is enhanced and counted as 1
+    // credit each. When false (default), only the cover image is processed
+    // for 1 credit total — matches the legacy "Cover only" behavior so
+    // existing users see no surprise credit deductions.
+    const allImages = body.allImages === true;
     if (ids.length === 0) {
       res.status(400).json({ error: "productIds array is required", code: "VALIDATION_ERROR" });
       return;
@@ -693,127 +698,168 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
     const failed: { productId: string; error: string }[] = [];
     let lastRemainingCredits: number | null = null;
 
-    // Small helper: process one product, mirrors the single-enhance flow
+    // Resolve any product image URL (local /media, https, or data: URI) to
+    // raw bytes. Pulled out of enhanceOne so it can be called per-image when
+    // allImages=true. Returns null if the URL shape isn't supported.
+    const loadImageBytes = async (url: string): Promise<{ mimeType: string; base64: string } | null> => {
+      try {
+        if (url.startsWith("/media/")) {
+          const rel = url.slice("/media/".length).split("?")[0];
+          return await readLocalMedia(rel);
+        } else if (url.startsWith("data:")) {
+          return decodeDataUri(url);
+        } else if (/^https?:\/\//i.test(url)) {
+          return await fetchRemoteImage(url);
+        }
+      } catch {
+        return null;
+      }
+      return null;
+    };
+
+    // Process one product — possibly multiple images if allImages=true.
+    // Each image consumes 1 credit, refunds individually on Gemini failure,
+    // and the final write to the product depends on `mode`:
+    //   • prepend:   all newly-enhanced URLs go in front of existing images[]
+    //   • overwrite: images[] becomes JUST the newly-enhanced URLs (originals discarded)
+    //   • new:       one new draft product gets ALL the newly-enhanced URLs
     const enhanceOne = async (productId: string): Promise<void> => {
       const product = foundMap.get(productId);
       if (!product) {
         failed.push({ productId, error: "Product not found" });
         return;
       }
-      const images = Array.isArray(product.images) ? (product.images as string[]) : [];
-      const sourceUrl = images.find((u) => typeof u === "string" && u.length > 0);
-      if (!sourceUrl) {
+      const productImages = Array.isArray(product.images) ? (product.images as string[]) : [];
+      const validImages = productImages.filter((u): u is string => typeof u === "string" && u.length > 0);
+      if (validImages.length === 0) {
         failed.push({ productId, error: "No source image" });
         return;
       }
 
-      let source: { mimeType: string; base64: string };
-      try {
-        if (sourceUrl.startsWith("/media/")) {
-          const rel = sourceUrl.slice("/media/".length).split("?")[0];
-          source = await readLocalMedia(rel);
-        } else if (sourceUrl.startsWith("data:")) {
-          source = decodeDataUri(sourceUrl);
-        } else if (/^https?:\/\//i.test(sourceUrl)) {
-          source = await fetchRemoteImage(sourceUrl);
-        } else {
-          failed.push({ productId, error: "Unsupported image source" });
-          return;
+      // Decide which input images to process.
+      const inputUrls = allImages ? validImages : [validImages[0]];
+      const enhancedUrls: string[] = [];   // /media/... URLs of successful outputs (in order)
+      let lastSavedImagePath: string | null = null;
+      let imagesEnhanced = 0;
+      let imagesFailed = 0;
+
+      for (let i = 0; i < inputUrls.length; i++) {
+        const url = inputUrls[i];
+
+        const source = await loadImageBytes(url);
+        if (!source) {
+          imagesFailed++;
+          console.warn(`[bulk-enhance] product ${productId} image ${i} unsupported source`);
+          continue;
         }
-      } catch (err) {
-        failed.push({ productId, error: err instanceof EnhanceError ? err.message : "Couldn't load source image" });
+
+        // Consume 1 credit per image. If credits run out mid-product, refund
+        // none (they were validly used) but stop processing further images
+        // for this product and let the outer loop know.
+        let creditUsage;
+        try {
+          creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
+        } catch (err) {
+          // Credits exhausted. Record the rest of this product's images as
+          // failed-due-to-credits, then re-throw so the outer worker knows
+          // and can short-circuit subsequent products too.
+          for (let j = i; j < inputUrls.length; j++) imagesFailed++;
+          if (imagesEnhanced === 0) {
+            failed.push({ productId, error: err instanceof AICreditError ? err.message : "Credit check failed" });
+          }
+          throw err;
+        }
+
+        try {
+          const output = await enhanceWithGemini({
+            inputMime: source.mimeType,
+            inputBase64: source.base64,
+            scene,
+            sceneText,
+          });
+          const saved = await saveEnhancementToLibrary(prisma, {
+            userId: req.auth!.userId,
+            base64: output.base64,
+            mimeType: output.mimeType,
+            background: sceneText ? `custom: ${sceneText.slice(0, 80)}` : scene,
+            folderName: "Enhanced Products",
+          });
+          enhancedUrls.push(saved.imageUrl);
+          lastSavedImagePath = saved.imagePath;
+          imagesEnhanced++;
+          lastRemainingCredits = creditUsage.totalCredits;
+        } catch (innerErr: any) {
+          await refundOneCredit(prisma, req.auth!.userId, creditUsage.usedPool);
+          imagesFailed++;
+          const message = innerErr?.message || "Enhancement failed";
+          console.error(`[bulk-enhance] product ${productId} image ${i} failed:`, message, innerErr?.code);
+        }
+      }
+
+      // If nothing succeeded, this product as a whole is a failure.
+      if (enhancedUrls.length === 0) {
+        failed.push({
+          productId,
+          error: imagesFailed > 0 ? "All images rejected by Gemini" : "No source images could be loaded",
+        });
         return;
       }
 
-      let creditUsage;
-      try {
-        creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
-      } catch (err) {
-        // Credits exhausted partway through the batch — stop trying to
-        // consume more (everyone after this gets the same error).
-        failed.push({ productId, error: err instanceof AICreditError ? err.message : "Credit check failed" });
-        throw err; // rethrow so the pool short-circuits
-      }
-
-      try {
-        const output = await enhanceWithGemini({
-          inputMime: source.mimeType,
-          inputBase64: source.base64,
-          scene,
-          sceneText,
+      // Apply the final write per mode. One DB write per product regardless of
+      // how many images we enhanced.
+      let newProductId: string | undefined;
+      if (mode === "new") {
+        const src = product as Awaited<ReturnType<typeof prisma.product.findFirst>>;
+        if (!src) throw new Error("Source product not found for clone");
+        const existingTags = Array.isArray(src.tags) ? (src.tags as unknown[]).filter((t): t is string => typeof t === "string") : [];
+        const tagsWithAi = existingTags.includes("ai-enhanced") ? existingTags : [...existingTags, "ai-enhanced"];
+        const created = await prisma.product.create({
+          data: {
+            userId: req.auth!.userId,
+            // Title stays verbatim — provenance via the ai-enhanced tag.
+            title: src.title,
+            description: src.description,
+            price: src.price,
+            compareAtPrice: src.compareAtPrice,
+            // sku, marketplace linkage, and platform IDs must NOT be copied —
+            // (sku+userId) is unique and duplicating a platformProductId would
+            // make Shopify/Salla think two rows are the same product.
+            sku: null,
+            barcode: null,
+            currency: src.currency,
+            quantity: src.quantity,
+            // Per Ashhad's product spec: 1 source product = 1 new draft,
+            // containing ALL the enhanced versions (not 1 draft per image).
+            images: enhancedUrls as unknown as Prisma.InputJsonValue,
+            category: src.category,
+            productType: src.productType,
+            vendor: src.vendor,
+            tags: tagsWithAi as unknown as Prisma.InputJsonValue,
+            weight: src.weight,
+            weightUnit: src.weightUnit,
+            status: "DRAFT",
+          },
+          select: { id: true },
         });
-        const saved = await saveEnhancementToLibrary(prisma, {
-          userId: req.auth!.userId,
-          base64: output.base64,
-          mimeType: output.mimeType,
-          background: sceneText ? `custom: ${sceneText.slice(0, 80)}` : scene,
-          folderName: "Enhanced Products",
-        });
-
-        let newProductId: string | undefined;
-        if (mode === "new") {
-          // Clone the product. We fetched the full row above in mode === "new"
-          // so `product` has every field available on Product.
-          const src = product as Awaited<ReturnType<typeof prisma.product.findFirst>>;
-          if (!src) throw new Error("Source product not found for clone");
-          const existingTags = Array.isArray(src.tags) ? (src.tags as unknown[]).filter((t): t is string => typeof t === "string") : [];
-          const tagsWithAi = existingTags.includes("ai-enhanced") ? existingTags : [...existingTags, "ai-enhanced"];
-          const created = await prisma.product.create({
-            data: {
-              userId: req.auth!.userId,
-              // Title stays verbatim — the AI provenance is carried by the
-              // "ai-enhanced" tag below, rendered as a badge in the UI so
-              // merchants can see what's AI-generated without the suffix
-              // polluting marketplace pushes or search results.
-              title: src.title,
-              description: src.description,
-              price: src.price,
-              compareAtPrice: src.compareAtPrice,
-              // sku, marketplace linkage, and platform IDs must NOT be copied —
-              // (sku+userId) is unique and duplicating a platformProductId would
-              // make Shopify/Salla think two rows are the same product.
-              sku: null,
-              barcode: null,
-              currency: src.currency,
-              quantity: src.quantity,
-              images: [saved.imageUrl] as unknown as Prisma.InputJsonValue,
-              category: src.category,
-              productType: src.productType,
-              vendor: src.vendor,
-              tags: tagsWithAi as unknown as Prisma.InputJsonValue,
-              weight: src.weight,
-              weightUnit: src.weightUnit,
-              status: "DRAFT",
-            },
-            select: { id: true },
-          });
-          newProductId = created.id;
-        } else {
-          // prepend (default) or overwrite — update in place
-          const nextImages = mode === "overwrite" ? [saved.imageUrl] : [saved.imageUrl, ...images];
-          await prisma.product.update({
-            where: { id: product.id },
-            data: { images: nextImages },
-          });
-        }
-
-        succeeded.push({
-          productId: product.id,
-          enhancedImageUrl: signMediaPath(saved.imagePath, MEDIA_TTL_SHORT),
-          ...(newProductId ? { newProductId } : {}),
-        });
-        lastRemainingCredits = creditUsage.totalCredits;
-      } catch (innerErr: any) {
-        await refundOneCredit(prisma, req.auth!.userId, creditUsage.usedPool);
-        const message = innerErr?.message || "Enhancement failed";
-        console.error(`[bulk-enhance] product ${product.id} failed:`, message, innerErr?.code);
-        failed.push({
-          productId: product.id,
-          error: /Unable to process input image|INVALID_ARGUMENT|input image/i.test(message)
-            ? "Gemini rejected the source image"
-            : "Enhancement failed",
+        newProductId = created.id;
+      } else {
+        // prepend (default) or overwrite — update in place
+        const nextImages = mode === "overwrite" ? enhancedUrls : [...enhancedUrls, ...productImages];
+        await prisma.product.update({
+          where: { id: product.id },
+          data: { images: nextImages },
         });
       }
+
+      succeeded.push({
+        productId: product.id,
+        // Surface the FIRST enhanced URL as the primary preview. The full
+        // list lives on the product itself.
+        enhancedImageUrl: lastSavedImagePath
+          ? signMediaPath(lastSavedImagePath, MEDIA_TTL_SHORT)
+          : enhancedUrls[0],
+        ...(newProductId ? { newProductId } : {}),
+      });
     };
 
     // Dispatch with a concurrency cap. Each worker pulls the next id until
