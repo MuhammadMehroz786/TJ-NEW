@@ -47,26 +47,37 @@ export class EnhanceError extends Error {
   }
 }
 
-// Phrases that indicate the user is trying to override our system prompt.
-// If any match, the entire user input is rejected and we fall back to the
-// preset background — the user-supplied text never reaches Gemini.
+// Phrases / structural patterns that indicate the user is trying to override
+// our system prompt. If any match, the entire user input is rejected and we
+// fall back to the preset background — the user-supplied text never reaches
+// Gemini.
 //
-// This is layered with sanitizeSceneText (which strips bytes) — the regex
-// pass here is structural ("does this look like an instruction at all?"),
-// the byte-strip is character-level. Both run together because real
-// jailbreaks tend to combine techniques.
+// Layered with sanitizeSceneText: the byte-strip handles individual chars,
+// the regex pass here handles intent (natural language jailbreaks AND
+// structural injections like JSON-spoofing brackets).
 const HOSTILE_PATTERNS = [
+  // Natural-language overrides
   /\b(?:ignore|disregard|forget|skip|drop|override|bypass|disable)\b.{0,40}\b(?:previous|prior|above|earlier|all|instructions?|rules?|prompt|system)\b/i,
   /\b(?:instead|rather)\s+(?:of|just|simply)\b/i,
-  /\b(?:replace|change|swap|substitute)\s+the\s+(?:product|subject|item|object|main)\b/i,
-  /\bjust\s+(?:generate|create|make|produce|render|draw|show)\b/i,
-  /\b(?:generate|create|make|produce|render|draw|show)\s+(?:a|an|the)\s+(?:picture|photo|image|drawing|render)\s+of\b/i,
-  /\b(?:forget|remove|delete|erase)\s+the\s+(?:product|subject|item)\b/i,
-  /\bnew\s+(?:task|instruction|prompt|directive|goal)\b/i,
+  /\b(?:replace|change|swap|substitute|remove|delete|erase|terminate)\s+(?:the\s+)?(?:product|subject|item|object|main|photography|task|canvas)\b/i,
+  /\bjust\s+(?:generate|create|make|produce|render|draw|show|depict)\b/i,
+  /\b(?:generate|create|make|produce|render|draw|show|depict)\s+(?:a|an|the)\s+(?:picture|photo|image|drawing|render|view|scene|landscape|portrait)\s+of\b/i,
+  /\b(?:forget|remove|delete|erase)\s+the\s+(?:product|subject|item|shoes?)\b/i,
+  /\bno\s+(?:objects?|products?|items?|shoes?|watch|bag)\s+in\s+(?:frame|view|sight|the\s+image)\b/i,
+  /\bnew\s+(?:task|instruction|prompt|directive|goal|role)\b/i,
   /\b(?:system|assistant|user|developer|admin)\s*[:>]/i,
   /\bact\s+(?:as|like)\b/i,
   /\bpretend\s+(?:to|that|you)\b/i,
   /\bfrom\s+now\s+on\b/i,
+  // Structural injections — JSON / config-spoofing (Ashhad's "context switch" attack)
+  /["']\s*(?:task|role|new_role|goal|directive|instruction|mode|behavior|persona)\s*["']\s*:/i,
+  /\b(?:terminate|reset|reinitialize|reboot)_(?:photography|task|role|context|instructions?)\b/i,
+  /\b(?:landscape_painter|new_persona|alt_role)\b/i,
+  /\]\s*\.\s*\[/,                    // ]. [ — closing-then-opening pattern
+  /\}\s*\.\s*\{/,                    // }. { — same
+  /\{\s*["']\w+["']\s*:/,            // { "key": — JSON-object opening
+  // Heavy use of brackets/braces is suspicious — flag if 4+ occur in a 300-char input
+  /[\[\]{}].*[\[\]{}].*[\[\]{}].*[\[\]{}]/,
 ];
 
 function looksHostile(text: string): boolean {
@@ -77,10 +88,15 @@ function looksHostile(text: string): boolean {
 // Gemini prompt. Strips characters used in prompt-injection attempts and
 // length-caps. Used together with looksHostile() — sanitizeSceneText handles
 // raw bytes, looksHostile handles intent.
+//
+// Brackets and braces are stripped because they have no legitimate use in
+// a natural-language background description but are heavily used in
+// structural prompt-injection attacks ("[task: terminate]", '{"role":"x"}').
 export function sanitizeSceneText(raw: string): string {
   let s = raw.replace(/[\r\n]+/g, " ");
   s = s.replace(/[`"']{3,}/g, "");
   s = s.replace(/<[^>]{0,120}>/g, "");
+  s = s.replace(/[\[\]{}]/g, "");        // strip JSON/config bracketry
   s = s.replace(/\b(?:system|assistant|user)\s*:/gi, "");
   s = s.replace(/\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above|earlier)/gi, "");
   s = s.replace(/\s+/g, " ").trim();

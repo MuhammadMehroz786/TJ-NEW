@@ -1,20 +1,32 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Phrases that indicate the user is trying to override the system prompt.
-// If any match, the entire user input is replaced with a benign no-op
-// instruction so the call still goes through but does nothing destructive.
+// Phrases / structural patterns that indicate the user is trying to override
+// the system prompt. If any match, the entire user input is replaced with a
+// benign no-op instruction so the call still goes through but does nothing
+// destructive. Covers BOTH natural-language jailbreaks AND structural
+// injections like JSON-spoofing brackets ("Context Switch" attacks).
 const HOSTILE_PATTERNS = [
+  // Natural-language overrides
   /\b(?:ignore|disregard|forget|skip|drop|override|bypass|disable)\b.{0,40}\b(?:previous|prior|above|earlier|all|instructions?|rules?|prompt|system)\b/i,
   /\b(?:instead|rather)\s+(?:of|just|simply)\b/i,
-  /\b(?:replace|change|swap|substitute)\s+the\s+(?:product|subject|item|object|main)\b/i,
-  /\bjust\s+(?:generate|create|make|produce|render|draw|show)\b/i,
-  /\b(?:generate|create|make|produce|render|draw|show)\s+(?:a|an|the)\s+(?:picture|photo|image|drawing|render)\s+of\b/i,
-  /\b(?:forget|remove|delete|erase)\s+the\s+(?:product|subject|item)\b/i,
-  /\bnew\s+(?:task|instruction|prompt|directive|goal)\b/i,
+  /\b(?:replace|change|swap|substitute|remove|delete|erase|terminate)\s+(?:the\s+)?(?:product|subject|item|object|main|photography|task|canvas)\b/i,
+  /\bjust\s+(?:generate|create|make|produce|render|draw|show|depict)\b/i,
+  /\b(?:generate|create|make|produce|render|draw|show|depict)\s+(?:a|an|the)\s+(?:picture|photo|image|drawing|render|view|scene|landscape|portrait)\s+of\b/i,
+  /\b(?:forget|remove|delete|erase)\s+the\s+(?:product|subject|item|shoes?)\b/i,
+  /\bno\s+(?:objects?|products?|items?|shoes?|watch|bag)\s+in\s+(?:frame|view|sight|the\s+image)\b/i,
+  /\bnew\s+(?:task|instruction|prompt|directive|goal|role)\b/i,
   /\b(?:system|assistant|user|developer|admin)\s*[:>]/i,
   /\bact\s+(?:as|like)\b/i,
   /\bpretend\s+(?:to|that|you)\b/i,
   /\bfrom\s+now\s+on\b/i,
+  // Structural injections — JSON / config-spoofing
+  /["']\s*(?:task|role|new_role|goal|directive|instruction|mode|behavior|persona)\s*["']\s*:/i,
+  /\b(?:terminate|reset|reinitialize|reboot)_(?:photography|task|role|context|instructions?)\b/i,
+  /\b(?:landscape_painter|new_persona|alt_role)\b/i,
+  /\]\s*\.\s*\[/,
+  /\}\s*\.\s*\{/,
+  /\{\s*["']\w+["']\s*:/,
+  /[\[\]{}].*[\[\]{}].*[\[\]{}].*[\[\]{}]/,
 ];
 
 function looksHostile(text: string): boolean {
@@ -23,12 +35,13 @@ function looksHostile(text: string): boolean {
 
 // Strip characters + tokens that attackers commonly use to break out of a
 // delimited prompt section (newlines, backticks, triple-quotes, markdown
-// headers, "system:" roleplay, common jailbreak phrases). After sanitization
-// we also length-cap the instruction.
+// headers, brackets/braces used in JSON-spoofing, "system:" roleplay,
+// common jailbreak phrases). After sanitization we also length-cap.
 export function sanitizeInstruction(raw: string): string {
   let s = raw.replace(/[\r\n]+/g, " "); // no line breaks
   s = s.replace(/[`"']{3,}/g, "");       // no triple quotes
   s = s.replace(/<[^>]{0,120}>/g, "");    // strip angle-bracket tags
+  s = s.replace(/[\[\]{}]/g, "");          // strip JSON/config bracketry
   s = s.replace(/\b(?:system|assistant|user)\s*:/gi, "");
   s = s.replace(/\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above|earlier)/gi, "");
   s = s.replace(/\s+/g, " ").trim();
