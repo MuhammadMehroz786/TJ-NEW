@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { GoogleGenAI } from "@google/genai";
-import { AICreditError, consumeWeeklyAICredit, getAICredits } from "../services/aiCredits";
+import { AICreditError, consumeWeeklyAICredit, refundOneCredit, getAICredits } from "../services/aiCredits";
 import {
   downloadWhatsAppMedia,
   extractIncomingMessages,
@@ -136,8 +136,17 @@ async function sendWelcomeMessage(to: string, lang: Lang = "en"): Promise<void> 
   });
 }
 
-async function sendHelp(to: string, lang: Lang = "en"): Promise<void> {
-  await sendWhatsAppTextMessage({ to, body: t(lang, "help") });
+async function sendHelp(to: string, lang: Lang = "en", state?: string): Promise<void> {
+  // Show a focused mid-flow hint when the user is partway through a known
+  // sub-flow. Falls back to the full command list everywhere else.
+  const stateToHelpKey: Record<string, "help_mid_email" | "help_mid_otp" | "help_mid_batch_theme" | "help_mid_account_answer"> = {
+    [STATES.AWAITING_EMAIL]:          "help_mid_email",
+    [STATES.AWAITING_OTP]:            "help_mid_otp",
+    [STATES.AWAITING_BATCH_THEME]:    "help_mid_batch_theme",
+    [STATES.AWAITING_ACCOUNT_ANSWER]: "help_mid_account_answer",
+  };
+  const key = (state && stateToHelpKey[state]) || "help";
+  await sendWhatsAppTextMessage({ to, body: t(lang, key) });
 }
 
 async function sendRefinementButtons(to: string, lang: Lang = "en"): Promise<void> {
@@ -209,7 +218,7 @@ async function handleSlashCommand(answer: string, from: string, session: Session
   switch (cmd) {
     case "/help":
     case "/commands":
-      await sendHelp(from, lang);
+      await sendHelp(from, lang, session.state);
       return true;
 
     case "/language":
@@ -404,10 +413,11 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             },
           });
           session = updated;
-          await sendWhatsAppTextMessage({
-            to: from,
-            body: t(newLang, pickEn ? "language_set_en" : "language_set_ar"),
-          });
+          // Combine language confirmation + welcome into one interactive
+          // message so the merchant doesn't get a two-message ping when one
+          // would do. The welcome includes its own buttons, so we just send
+          // it directly — the language confirmation is implicit in the fact
+          // that this whole reply is in the chosen language.
           await sendWelcomeMessage(from, newLang);
           continue;
         }
@@ -924,11 +934,14 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
 
   const toProcess = imageIds.slice(0, canEnhance);
 
-  // Process in parallel but surface per-image failures individually
+  // Process in parallel but surface per-image failures individually.
+  // Capture which credit pool was charged BEFORE the work started, so the
+  // failure path knows what to refund. Previously the failed branch lost
+  // this information and verified merchants weren't refunded.
   const results = await Promise.all(
     toProcess.map(async (imageId) => {
+      let usedPool: "weekly" | "purchased" | null = null;
       try {
-        let usedPool: "weekly" | "purchased" | null = null;
         if (session.isVerified && session.userId) {
           const usage = await consumeWeeklyAICredit(prisma, session.userId);
           usedPool = usage.usedPool;
@@ -944,22 +957,23 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
         return { ok: true as const, media, enhanced, usedPool };
       } catch (err) {
         console.error("[WhatsApp] batch item failed:", (err as Error)?.message || err);
-        return { ok: false as const, error: (err as Error)?.message || "Enhancement failed" };
+        return { ok: false as const, usedPool, error: (err as Error)?.message || "Enhancement failed" };
       }
     }),
   );
 
-  // Refund any credits for failed items
+  // Refund any credits for failed items — guests get the session counter
+  // decremented; verified merchants get the credit returned to the same
+  // pool (weekly/purchased) it was consumed from.
   for (const r of results) {
-    if (!r.ok) {
-      if (session.isVerified && session.userId && r !== undefined && "usedPool" in r && r.usedPool) {
-        // Can't happen here because failed path doesn't have usedPool, but keep the guard.
-      } else if (!session.isVerified) {
-        await prisma.whatsAppSession.update({
-          where: { id: session.id },
-          data: { creditsUsed: { decrement: 1 } },
-        });
-      }
+    if (r.ok) continue;
+    if (session.isVerified && session.userId && r.usedPool) {
+      await refundOneCredit(prisma, session.userId, r.usedPool);
+    } else if (!session.isVerified) {
+      await prisma.whatsAppSession.update({
+        where: { id: session.id },
+        data: { creditsUsed: { decrement: 1 } },
+      });
     }
   }
 
@@ -1093,10 +1107,13 @@ async function handleRefinement(
     return;
   }
 
-  // Credit check + consume
+  // Credit check + consume. Capture which pool (weekly/purchased) was charged
+  // so the catch{} below can refund the right one if Gemini rejects this call.
+  let consumedPool: "weekly" | "purchased" | null = null;
   if (session.isVerified && session.userId) {
     try {
-      await consumeWeeklyAICredit(prisma, session.userId);
+      const usage = await consumeWeeklyAICredit(prisma, session.userId);
+      consumedPool = usage.usedPool;
     } catch (err) {
       if (err instanceof AICreditError) {
         await sendWhatsAppTextMessage({
@@ -1193,7 +1210,12 @@ async function handleRefinement(
     await sendRefinementButtons(from, lang);
   } catch (err) {
     console.error("WhatsApp refinement error:", err);
-    if (!session.isVerified) {
+    // Refund whichever pool we drained — guests get their guest-trial counter
+    // decremented; verified merchants get the credit returned to the same
+    // pool (weekly or purchased) it came from.
+    if (session.isVerified && session.userId && consumedPool) {
+      await refundOneCredit(prisma, session.userId, consumedPool);
+    } else if (!session.isVerified) {
       await prisma.whatsAppSession.update({
         where: { id: session.id },
         data: { creditsUsed: { decrement: 1 } },

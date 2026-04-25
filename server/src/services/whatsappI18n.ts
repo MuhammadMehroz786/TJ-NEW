@@ -27,8 +27,8 @@ const dict: Dict = {
 
   // ── Language gate (new) ────────────────────────────────────────────────────
   language_gate: {
-    en: "👋 Welcome to TijarFlow! Please pick your language:\n\n*1* · English\n*2* · العربية\n\nReply with 1 or 2.",
-    ar: "👋 أهلاً بك في تجار فلو! الرجاء اختيار اللغة:\n\n*1* · English\n*2* · العربية\n\nردّ بـ 1 أو 2.",
+    en: "👋 Welcome to TijarFlow! Please pick your language:\n\n*1* · English\n*2* · العربية\n\nReply with 1 or 2.\n_(You can change language later with /language.)_",
+    ar: "👋 أهلاً بك في تجار فلو! الرجاء اختيار اللغة:\n\n*1* · English\n*2* · العربية\n\nردّ بـ 1 أو 2.\n_(يمكنك تغيير اللغة لاحقاً بكتابة /language)_",
   },
   language_set_en: {
     en: "✅ English selected.",
@@ -67,6 +67,27 @@ const dict: Dict = {
       "• أرسل صورة أو عدة صور للمنتج — سأحسّنها جميعاً بعد ٥ ثوانٍ من توقّف الإرسال.\n" +
       "• *ردّ* على أي صورة محسّنة بتعليمات مثل _اجعل الخلفية أغمق_ لتعديل تلك الصورة تحديداً.\n" +
       "• أو اكتب تعديلاً جديداً لتحسين آخر صورة.",
+  },
+
+  // ── Contextual /help when mid-flow ─────────────────────────────────────────
+  // These short hints replace the generic command-list when the user is in
+  // the middle of something specific. They always include /start as the
+  // escape hatch, so nobody is ever stuck.
+  help_mid_email: {
+    en: "📧 You're partway through linking your account.\n\nType the *email address* you used to register on TijarFlow, or type /start to begin again.",
+    ar: "📧 أنت في منتصف ربط حسابك.\n\nاكتب *البريد الإلكتروني* الذي سجّلت به في تجار فلو، أو اكتب /start للبدء من جديد.",
+  },
+  help_mid_otp: {
+    en: "🔑 Waiting on the 6-digit code we just emailed you.\n\nType the *code from your inbox*, or type /start to begin again.",
+    ar: "🔑 ننتظر الرمز المكوّن من 6 أرقام الذي أرسلناه إلى بريدك.\n\nاكتب *الرمز من بريدك*، أو اكتب /start للبدء من جديد.",
+  },
+  help_mid_batch_theme: {
+    en: "🎨 I'm waiting for your theme — describe the background you want (e.g. _clean white studio_, _marble counter_).\n\nType /start to begin again.",
+    ar: "🎨 أنتظر الثيم — صف الخلفية التي تريدها (مثل _استوديو أبيض نظيف_، _طاولة رخامية_).\n\nاكتب /start للبدء من جديد.",
+  },
+  help_mid_account_answer: {
+    en: "👋 Tap *Yes, I'm registered* to link your TijarFlow account, or *No* to use 5 free trial enhancements.",
+    ar: "👋 اضغط *نعم، أنا مسجّل* لربط حسابك في تجار فلو، أو *لا* لاستخدام 5 تحسينات تجريبية مجانية.",
   },
 
   // ── Command responses ──────────────────────────────────────────────────────
@@ -191,8 +212,8 @@ const dict: Dict = {
 
   // ── Batch collection + theme ask ───────────────────────────────────────────
   batch_first_image: {
-    en: "✨ Got your image! Send more if you want — I'll ask for the theme after a few seconds of silence.",
-    ar: "✨ وصلتني صورتك! أرسل المزيد إذا أردت — سأسألك عن الثيم بعد توقّف الإرسال بعدة ثوانٍ.",
+    en: "✨ Got your image! Send more right away if you want, otherwise I'll ask for the theme in a moment.",
+    ar: "✨ وصلتني صورتك! أرسل المزيد فوراً إذا أردت، وإلا سأسألك عن الثيم بعد لحظة.",
   },
   ask_theme: {
     en: "Got {count} image{plural}! 📸\n\nWhat theme or background would you like?\n\nExamples:\n• _clean white studio_\n• _marble kitchen counter_\n• _outdoor sunset scene_\n• _minimal black background_\n\nSend your theme as a text message.",
@@ -249,8 +270,8 @@ const dict: Dict = {
 
   // ── Errors ─────────────────────────────────────────────────────────────────
   enhance_failed_generic: {
-    en: "Sorry, we could not enhance your image right now. Please try again.",
-    ar: "عذراً، تعذّر تحسين الصورة الآن. حاول مرة أخرى.",
+    en: "Sorry, we couldn't enhance your image right now. _Your credit was refunded_ — please try again.",
+    ar: "عذراً، تعذّر تحسين الصورة الآن. _تمّ استرجاع رصيدك_ — حاول مرة أخرى.",
   },
   refine_applying: {
     en: "🎨 Applying your refinement... one moment.",
@@ -261,8 +282,8 @@ const dict: Dict = {
     ar: "لم تعد لديّ الصورة السابقة. أرسل صورة منتج جديدة للبدء من جديد.",
   },
   refine_failed: {
-    en: "Sorry, I couldn't apply that refinement. Try rephrasing it, or send a new image.",
-    ar: "عذراً، لم أستطع تطبيق التعديل. أعد صياغته أو أرسل صورة جديدة.",
+    en: "Sorry, I couldn't apply that refinement. _Your credit was refunded_ — try rephrasing it, or send a new image.",
+    ar: "عذراً، لم أستطع تطبيق التعديل. _تمّ استرجاع رصيدك_ — أعد صياغته أو أرسل صورة جديدة.",
   },
   refine_applied_verified: {
     en: "✅ Refinement applied. Credits remaining: {weekly} monthly{purchased}.",
