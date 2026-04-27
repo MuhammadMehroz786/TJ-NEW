@@ -80,6 +80,7 @@ model User {
   whatsappSessions       WhatsAppSession[]
   creditPurchases        CreditPurchase[]
   passwordResetTokens    PasswordResetToken[]
+  aiCreditCodeRedemptions AiCreditCodeRedemption[]
 }
 
 model CreatorProfile {
@@ -382,5 +383,41 @@ model CreditPurchase {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, createdAt])
+}
+
+// Admin-issued promo codes that grant AI credits when redeemed by a merchant.
+// Distinct from `PromoCode` (which is merchant-issued storefront discounts).
+model AiCreditCode {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  credits         Int
+  // null = unlimited redemptions; otherwise total cap across all users
+  maxRedemptions  Int?
+  // null = never expires
+  expiresAt       DateTime?
+  isActive        Boolean  @default(true)
+  note            String?
+  createdBy       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  redemptions AiCreditCodeRedemption[]
+
+  @@index([code])
+}
+
+model AiCreditCodeRedemption {
+  id        String   @id @default(uuid())
+  codeId    String
+  userId    String
+  credits   Int
+  createdAt DateTime @default(now())
+
+  code AiCreditCode @relation(fields: [codeId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One redemption per user per code
+  @@unique([codeId, userId])
   @@index([userId, createdAt])
 }

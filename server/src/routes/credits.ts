@@ -317,6 +317,76 @@ router.get("/usage", authenticate, async (req: AuthRequest, res: Response): Prom
   }
 });
 
+// ── POST /api/credits/redeem-code ────────────────────────────────────────────
+// Merchant redeems an admin-issued AI credit code. Idempotent per (code, user)
+// via the unique index on AiCreditCodeRedemption — a duplicate submit returns
+// the existing redemption rather than double-granting credits.
+router.post("/redeem-code", authenticate, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const body = req.body as { code?: unknown };
+    const codeInput = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
+    if (!codeInput || codeInput.length < 3 || codeInput.length > 40) {
+      res.status(400).json({ error: "code is required", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    const userId = req.auth!.userId;
+
+    const code = await prisma.aiCreditCode.findUnique({
+      where: { code: codeInput },
+      include: { _count: { select: { redemptions: true } } },
+    });
+
+    if (!code || !code.isActive) {
+      res.status(404).json({ error: "Invalid code", code: "INVALID_CODE" });
+      return;
+    }
+    if (code.expiresAt && code.expiresAt.getTime() < Date.now()) {
+      res.status(410).json({ error: "This code has expired", code: "EXPIRED" });
+      return;
+    }
+    if (code.maxRedemptions !== null && code._count.redemptions >= code.maxRedemptions) {
+      res.status(409).json({ error: "This code has reached its redemption limit", code: "LIMIT_REACHED" });
+      return;
+    }
+
+    // Already redeemed by this user? Return current balance, don't re-grant.
+    const existing = await prisma.aiCreditCodeRedemption.findUnique({
+      where: { codeId_userId: { codeId: code.id, userId } },
+    });
+    if (existing) {
+      res.status(409).json({ error: "You have already redeemed this code", code: "ALREADY_REDEEMED" });
+      return;
+    }
+
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.aiCreditCodeRedemption.create({
+          data: { codeId: code.id, userId, credits: code.credits },
+        });
+        await tx.user.update({
+          where: { id: userId },
+          data: { purchasedCredits: { increment: code.credits } },
+        });
+      });
+    } catch (e: unknown) {
+      // Race: same user submitted twice and one lost the unique-index race.
+      if (e instanceof Error && "code" in e && (e as { code?: string }).code === "P2002") {
+        res.status(409).json({ error: "You have already redeemed this code", code: "ALREADY_REDEEMED" });
+        return;
+      }
+      throw e;
+    }
+
+    const balance = await getAICredits(prisma, userId);
+    console.log(`✅ Code redeemed: ${code.credits} credits to user ${userId} (code=${code.code})`);
+    res.json({ credits: code.credits, code: code.code, balance });
+  } catch (err) {
+    console.error("Redeem code error:", err);
+    res.status(500).json({ error: "Failed to redeem code", code: "INTERNAL_ERROR" });
+  }
+});
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 // First day of the next calendar month at 00:00 UTC. Used to tell the client
 // when the monthly free-credits pool will refresh.

@@ -86,6 +86,9 @@ export function Billing() {
   const [customCredits, setCustomCredits] = useState(100);
   const [isCustom,      setIsCustom]      = useState(false);
 
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeeming,  setRedeeming]  = useState(false);
+
   const selectedCredits = isCustom ? customCredits : (selectedTier ?? 0);
   const computedPrice   = isCustom
     ? Math.round(customCredits * CUSTOM_PRICE_PER_CREDIT * 100) / 100
@@ -149,6 +152,34 @@ export function Billing() {
       navigate("/billing", { replace: true });
     }
   }, [searchParams, navigate, loadData]);
+
+  // ── Redeem code ───────────────────────────────────────────────────────────────
+
+  const handleRedeem = async () => {
+    const code = redeemCode.trim().toUpperCase();
+    if (code.length < 3) return;
+    setRedeeming(true);
+    try {
+      const r = await api.post("/credits/redeem-code", { code });
+      toast.success(t("billing.redeemSuccess", { n: r.data.credits, defaultValue: `${r.data.credits} credits added` }));
+      setRedeemCode("");
+      if (r.data.balance) setBalance(r.data.balance);
+      loadData();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { code?: string; error?: string } } };
+      const errCode = e?.response?.data?.code;
+      const map: Record<string, string> = {
+        INVALID_CODE: "billing.redeemErrInvalid",
+        EXPIRED: "billing.redeemErrExpired",
+        LIMIT_REACHED: "billing.redeemErrLimit",
+        ALREADY_REDEEMED: "billing.redeemErrAlready",
+      };
+      const i18nKey = errCode && map[errCode];
+      toast.error(i18nKey ? t(i18nKey as never) : (e?.response?.data?.error || "Failed to redeem code"));
+    } finally {
+      setRedeeming(false);
+    }
+  };
 
   // ── Checkout ──────────────────────────────────────────────────────────────────
 
@@ -317,6 +348,29 @@ export function Billing() {
             <p className="text-xs text-amber-700 leading-relaxed">
               {t("billing.howItWorksBody")}
             </p>
+          </div>
+
+          {/* Redeem code */}
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs font-semibold text-slate-700 mb-2">{t("billing.redeemTitle")}</p>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={redeemCode}
+                onChange={(e) => setRedeemCode(e.target.value.toUpperCase().slice(0, 40))}
+                onKeyDown={(e) => { if (e.key === "Enter") handleRedeem(); }}
+                placeholder={t("billing.redeemPlaceholder")}
+                disabled={redeeming}
+                className="flex-1 h-9 px-3 text-sm font-mono uppercase tracking-wider border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:opacity-50"
+              />
+              <Button
+                onClick={handleRedeem}
+                disabled={redeeming || redeemCode.trim().length < 3}
+                className="h-9 bg-teal-600 hover:bg-teal-700 text-white"
+              >
+                {redeeming ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : t("billing.redeemButton")}
+              </Button>
+            </div>
           </div>
         </div>
 

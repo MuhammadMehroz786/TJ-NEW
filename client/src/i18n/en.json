@@ -257,7 +257,15 @@
     "statusPending": "Pending",
     "statusRefunded": "Refunded",
     "noRecent": "No recent transactions yet",
-    "noRecentSub": "Select a plan to get started"
+    "noRecentSub": "Select a plan to get started",
+    "redeemTitle": "Have a code?",
+    "redeemPlaceholder": "Enter your code",
+    "redeemButton": "Redeem",
+    "redeemSuccess": "{{n}} credits added!",
+    "redeemErrInvalid": "Invalid code",
+    "redeemErrExpired": "This code has expired",
+    "redeemErrLimit": "This code has reached its redemption limit",
+    "redeemErrAlready": "You have already redeemed this code"
   },
   "sidebar": {
     "loggedInAs": "Logged in as"

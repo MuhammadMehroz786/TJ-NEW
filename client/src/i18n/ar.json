@@ -257,7 +257,15 @@
     "statusPending": "قيد الانتظار",
     "statusRefunded": "مستردة",
     "noRecent": "لا توجد معاملات حديثة بعد",
-    "noRecentSub": "اختر باقة للبدء"
+    "noRecentSub": "اختر باقة للبدء",
+    "redeemTitle": "هل لديك رمز؟",
+    "redeemPlaceholder": "أدخل الرمز",
+    "redeemButton": "استرداد",
+    "redeemSuccess": "تمت إضافة {{n}} رصيد!",
+    "redeemErrInvalid": "رمز غير صالح",
+    "redeemErrExpired": "انتهت صلاحية هذا الرمز",
+    "redeemErrLimit": "وصل هذا الرمز إلى الحد الأقصى للاستخدام",
+    "redeemErrAlready": "لقد استخدمت هذا الرمز من قبل"
   },
   "sidebar": {
     "loggedInAs": "تسجيل الدخول كـ"

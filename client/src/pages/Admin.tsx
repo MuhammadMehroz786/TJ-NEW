@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Users, DollarSign, Sparkles, MessageCircle, Search, ShieldCheck, Wallet, ArrowUpRight, Activity, TrendingUp, Server, Gauge } from "lucide-react";
+import { Users, DollarSign, Sparkles, MessageCircle, Search, ShieldCheck, Wallet, ArrowUpRight, Activity, TrendingUp, Server, Gauge, Ticket, Plus, Copy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,18 @@ interface SystemHealth { uptimeSeconds: number; memory: { rssMb: number; heapUse
 interface UserRow {
   id: string; email: string; name: string; role: "MERCHANT" | "CREATOR" | "ADMIN";
   aiCredits: number; purchasedCredits: number; createdAt: string;
+}
+
+interface AiCreditCode {
+  id: string;
+  code: string;
+  credits: number;
+  maxRedemptions: number | null;
+  expiresAt: string | null;
+  isActive: boolean;
+  note: string | null;
+  createdAt: string;
+  redemptionCount: number;
 }
 
 interface UserDetail {
@@ -120,7 +132,7 @@ function Tabs({ tabs, active, onChange }: { tabs: { id: string; label: string; i
 // Main component
 // ──────────────────────────────────────────────────────────────────────────────
 export function Admin() {
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "revenue" | "activity" | "whatsapp" | "system">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "users" | "revenue" | "activity" | "whatsapp" | "codes" | "system">("overview");
 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [active, setActive] = useState<ActiveUsers | null>(null);
@@ -147,6 +159,12 @@ export function Admin() {
   const [grantAmount, setGrantAmount] = useState("50");
   const [grantNote, setGrantNote] = useState("");
   const [granting, setGranting] = useState(false);
+
+  // AI Codes tab
+  const [codes, setCodes] = useState<AiCreditCode[]>([]);
+  const [codesLoading, setCodesLoading] = useState(false);
+  const [codeForm, setCodeForm] = useState({ code: "", credits: "100", maxRedemptions: "", expiresAt: "", note: "" });
+  const [creatingCode, setCreatingCode] = useState(false);
 
   const loadAll = useCallback(async () => {
     try {
@@ -224,6 +242,56 @@ export function Admin() {
     }
   };
 
+  // ── AI Codes tab handlers ────────────────────────────────────────────────
+  const loadCodes = useCallback(() => {
+    setCodesLoading(true);
+    api.get("/admin/ai-credit-codes")
+      .then((r) => setCodes(r.data.data))
+      .catch(() => toast.error("Failed to load codes"))
+      .finally(() => setCodesLoading(false));
+  }, []);
+  useEffect(() => { if (activeTab === "codes") loadCodes(); }, [activeTab, loadCodes]);
+
+  const generateCode = () => {
+    // 8-char alpha-num, easy to read aloud
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let s = "";
+    for (let i = 0; i < 8; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+    setCodeForm((f) => ({ ...f, code: s }));
+  };
+
+  const submitCreateCode = async () => {
+    const code = codeForm.code.trim().toUpperCase();
+    const credits = parseInt(codeForm.credits, 10);
+    if (!code || code.length < 3) return toast.error("Code must be at least 3 characters");
+    if (!/^[A-Z0-9_-]+$/.test(code)) return toast.error("Code can only contain A-Z, 0-9, _ and -");
+    if (!Number.isInteger(credits) || credits < 1) return toast.error("Credits must be a positive integer");
+    setCreatingCode(true);
+    try {
+      const payload: Record<string, unknown> = { code, credits };
+      if (codeForm.maxRedemptions) payload.maxRedemptions = parseInt(codeForm.maxRedemptions, 10);
+      if (codeForm.expiresAt) payload.expiresAt = new Date(codeForm.expiresAt).toISOString();
+      if (codeForm.note.trim()) payload.note = codeForm.note.trim();
+      await api.post("/admin/ai-credit-codes", payload);
+      toast.success(`Code ${code} created`);
+      setCodeForm({ code: "", credits: "100", maxRedemptions: "", expiresAt: "", note: "" });
+      loadCodes();
+    } catch (err: unknown) {
+      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to create code");
+    } finally {
+      setCreatingCode(false);
+    }
+  };
+
+  const toggleCodeActive = async (id: string, isActive: boolean) => {
+    try {
+      await api.patch(`/admin/ai-credit-codes/${id}`, { isActive });
+      loadCodes();
+    } catch {
+      toast.error("Failed to update code");
+    }
+  };
+
   const handleRoleChange = async (newRole: "MERCHANT" | "CREATOR" | "ADMIN") => {
     if (!detail) return;
     try {
@@ -268,6 +336,7 @@ export function Admin() {
           { id: "revenue", label: "Revenue", icon: DollarSign },
           { id: "activity", label: "Activity", icon: Activity },
           { id: "whatsapp", label: "WhatsApp", icon: MessageCircle },
+          { id: "codes", label: "AI Codes", icon: Ticket },
           { id: "system", label: "System", icon: Server },
         ]}
       />
@@ -572,6 +641,158 @@ export function Admin() {
       )}
 
       {/* ══════════ SYSTEM TAB ══════════ */}
+      {/* ══════════ AI CODES TAB ══════════ */}
+      {activeTab === "codes" && (
+        <div className="space-y-5">
+          {/* Create new code */}
+          <Card className="border-slate-200">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                  <Plus className="h-4 w-4 text-teal-600" /> Create AI credit code
+                </h3>
+                <p className="text-xs text-slate-500">Merchants redeem on the Billing page</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+                <div className="md:col-span-2">
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Code</label>
+                  <div className="flex gap-1">
+                    <Input
+                      value={codeForm.code}
+                      onChange={(e) => setCodeForm({ ...codeForm, code: e.target.value.toUpperCase() })}
+                      placeholder="LAUNCH50"
+                      maxLength={40}
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={generateCode} title="Generate random code">
+                      <Sparkles className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Credits</label>
+                  <Input
+                    type="number" min={1} max={100000}
+                    value={codeForm.credits}
+                    onChange={(e) => setCodeForm({ ...codeForm, credits: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Max uses</label>
+                  <Input
+                    type="number" min={1}
+                    placeholder="∞"
+                    value={codeForm.maxRedemptions}
+                    onChange={(e) => setCodeForm({ ...codeForm, maxRedemptions: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Expires</label>
+                  <Input
+                    type="date"
+                    value={codeForm.expiresAt}
+                    onChange={(e) => setCodeForm({ ...codeForm, expiresAt: e.target.value })}
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button onClick={submitCreateCode} disabled={creatingCode} className="bg-teal-600 hover:bg-teal-700 text-white w-full">
+                    {creatingCode ? "Creating..." : "Create"}
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-3">
+                <label className="text-xs font-medium text-slate-600 mb-1 block">Note (internal, optional)</label>
+                <Input
+                  value={codeForm.note}
+                  onChange={(e) => setCodeForm({ ...codeForm, note: e.target.value })}
+                  placeholder="e.g. Ashhad QA testing"
+                  maxLength={200}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* List */}
+          <Card className="border-slate-200">
+            <CardContent className="p-0">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="font-semibold text-slate-900">All codes</h3>
+                <span className="text-xs text-slate-400">{codes.length} total</span>
+              </div>
+              {codesLoading ? (
+                <div className="p-8 text-center text-sm text-slate-400">Loading...</div>
+              ) : codes.length === 0 ? (
+                <div className="p-10 text-center text-sm text-slate-400">No codes yet — create one above.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-slate-400 uppercase tracking-wide">
+                    <tr className="border-b border-slate-100">
+                      <th className="text-left py-2.5 px-5">Code</th>
+                      <th className="text-left">Credits</th>
+                      <th className="text-left">Used</th>
+                      <th className="text-left">Expires</th>
+                      <th className="text-left">Note</th>
+                      <th className="text-left">Status</th>
+                      <th className="text-right pr-5">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {codes.map((c) => {
+                      const usedOut = c.maxRedemptions !== null && c.redemptionCount >= c.maxRedemptions;
+                      const expired = c.expiresAt !== null && new Date(c.expiresAt).getTime() < Date.now();
+                      return (
+                        <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+                          <td className="py-2.5 px-5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-semibold text-slate-900">{c.code}</span>
+                              <button
+                                onClick={() => { navigator.clipboard.writeText(c.code); toast.success("Copied"); }}
+                                title="Copy"
+                                className="text-slate-400 hover:text-slate-600"
+                              >
+                                <Copy className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="text-slate-700">{c.credits}</td>
+                          <td className="text-slate-500">
+                            {c.redemptionCount}{c.maxRedemptions !== null ? ` / ${c.maxRedemptions}` : ""}
+                          </td>
+                          <td className="text-slate-500 text-xs">
+                            {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : "—"}
+                          </td>
+                          <td className="text-slate-500 text-xs max-w-[200px] truncate" title={c.note || ""}>
+                            {c.note || "—"}
+                          </td>
+                          <td>
+                            {!c.isActive ? (
+                              <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-600">Disabled</Badge>
+                            ) : expired ? (
+                              <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-600">Expired</Badge>
+                            ) : usedOut ? (
+                              <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-700">Used up</Badge>
+                            ) : (
+                              <Badge className="text-xs bg-emerald-100 text-emerald-700">Active</Badge>
+                            )}
+                          </td>
+                          <td className="text-right pr-5">
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => toggleCodeActive(c.id, !c.isActive)}
+                            >
+                              {c.isActive ? "Disable" : "Enable"}
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {activeTab === "system" && sys && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

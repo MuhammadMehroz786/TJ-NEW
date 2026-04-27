@@ -476,4 +476,160 @@ router.get("/purchases", async (req: AuthRequest, res: Response): Promise<void> 
   }
 });
 
+// ── AI Credit Codes ──────────────────────────────────────────────────────────
+// Admin-issued codes that grant AI credits when redeemed by a merchant on the
+// Billing page. Distinct from `PromoCode` (merchant-issued storefront discounts).
+
+// GET /api/admin/ai-credit-codes — list codes with redemption counts
+router.get("/ai-credit-codes", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const codes = await prisma.aiCreditCode.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { _count: { select: { redemptions: true } } },
+    });
+    res.json({
+      data: codes.map((c) => ({
+        id: c.id,
+        code: c.code,
+        credits: c.credits,
+        maxRedemptions: c.maxRedemptions,
+        expiresAt: c.expiresAt,
+        isActive: c.isActive,
+        note: c.note,
+        createdBy: c.createdBy,
+        createdAt: c.createdAt,
+        redemptionCount: c._count.redemptions,
+      })),
+    });
+  } catch (err) {
+    console.error("[admin] list ai-credit-codes error:", err);
+    res.status(500).json({ error: "Failed to load codes", code: "INTERNAL_ERROR" });
+  }
+});
+
+// POST /api/admin/ai-credit-codes — create a code
+// Body: { code, credits, maxRedemptions?, expiresAt?, note? }
+router.post("/ai-credit-codes", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const body = req.body as {
+      code?: unknown; credits?: unknown; maxRedemptions?: unknown;
+      expiresAt?: unknown; note?: unknown;
+    };
+
+    const code = typeof body.code === "string" ? body.code.trim().toUpperCase() : "";
+    if (!code || code.length < 3 || code.length > 40 || !/^[A-Z0-9_-]+$/.test(code)) {
+      res.status(400).json({ error: "code must be 3–40 chars, A–Z, 0–9, _ or -", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    const credits = typeof body.credits === "number" ? body.credits : NaN;
+    if (!Number.isInteger(credits) || credits < 1 || credits > 100000) {
+      res.status(400).json({ error: "credits must be an integer between 1 and 100000", code: "VALIDATION_ERROR" });
+      return;
+    }
+
+    let maxRedemptions: number | null = null;
+    if (body.maxRedemptions !== undefined && body.maxRedemptions !== null) {
+      const n = Number(body.maxRedemptions);
+      if (!Number.isInteger(n) || n < 1 || n > 100000) {
+        res.status(400).json({ error: "maxRedemptions must be a positive integer or null", code: "VALIDATION_ERROR" });
+        return;
+      }
+      maxRedemptions = n;
+    }
+
+    let expiresAt: Date | null = null;
+    if (body.expiresAt) {
+      const d = new Date(String(body.expiresAt));
+      if (Number.isNaN(d.getTime())) {
+        res.status(400).json({ error: "expiresAt must be a valid date", code: "VALIDATION_ERROR" });
+        return;
+      }
+      expiresAt = d;
+    }
+
+    const note = typeof body.note === "string" ? body.note.trim().slice(0, 200) : null;
+
+    try {
+      const created = await prisma.aiCreditCode.create({
+        data: {
+          code,
+          credits,
+          maxRedemptions,
+          expiresAt,
+          note: note || null,
+          createdBy: req.auth!.userId,
+        },
+      });
+      res.status(201).json(created);
+    } catch (e: unknown) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+        res.status(409).json({ error: "Code already exists", code: "CONFLICT" });
+        return;
+      }
+      throw e;
+    }
+  } catch (err) {
+    console.error("[admin] create ai-credit-code error:", err);
+    res.status(500).json({ error: "Failed to create code", code: "INTERNAL_ERROR" });
+  }
+});
+
+// PATCH /api/admin/ai-credit-codes/:id — toggle isActive or update note/expiry
+router.patch("/ai-credit-codes/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const body = req.body as { isActive?: unknown; note?: unknown; expiresAt?: unknown };
+    const data: { isActive?: boolean; note?: string | null; expiresAt?: Date | null } = {};
+
+    if (body.isActive !== undefined) {
+      if (typeof body.isActive !== "boolean") {
+        res.status(400).json({ error: "isActive must be a boolean", code: "VALIDATION_ERROR" });
+        return;
+      }
+      data.isActive = body.isActive;
+    }
+    if (body.note !== undefined) {
+      data.note = body.note === null ? null : String(body.note).trim().slice(0, 200) || null;
+    }
+    if (body.expiresAt !== undefined) {
+      if (body.expiresAt === null) {
+        data.expiresAt = null;
+      } else {
+        const d = new Date(String(body.expiresAt));
+        if (Number.isNaN(d.getTime())) {
+          res.status(400).json({ error: "expiresAt must be a valid date", code: "VALIDATION_ERROR" });
+          return;
+        }
+        data.expiresAt = d;
+      }
+    }
+
+    const updated = await prisma.aiCreditCode.update({ where: { id: req.params.id }, data });
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+      res.status(404).json({ error: "Code not found", code: "NOT_FOUND" });
+      return;
+    }
+    console.error("[admin] update ai-credit-code error:", err);
+    res.status(500).json({ error: "Failed to update code", code: "INTERNAL_ERROR" });
+  }
+});
+
+// GET /api/admin/ai-credit-codes/:id/redemptions — see who used a code
+router.get("/ai-credit-codes/:id/redemptions", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const redemptions = await prisma.aiCreditCodeRedemption.findMany({
+      where: { codeId: req.params.id },
+      orderBy: { createdAt: "desc" },
+      include: { user: { select: { id: true, email: true, name: true } } },
+      take: 200,
+    });
+    res.json({ data: redemptions });
+  } catch (err) {
+    console.error("[admin] redemptions error:", err);
+    res.status(500).json({ error: "Failed to load redemptions", code: "INTERNAL_ERROR" });
+  }
+});
+
 export default router;
