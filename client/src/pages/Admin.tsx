@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Users, DollarSign, Sparkles, MessageCircle, Search, ShieldCheck, Wallet, ArrowUpRight, Activity, TrendingUp, Server, Gauge, Ticket, Plus, Copy } from "lucide-react";
+import { Users, DollarSign, Sparkles, MessageCircle, Search, ShieldCheck, Wallet, ArrowUpRight, Activity, TrendingUp, Server, Gauge, Ticket, Plus, Copy, Inbox } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,47 @@ interface AiCreditCode {
   note: string | null;
   createdAt: string;
   redemptionCount: number;
+}
+
+interface LeadRow {
+  id: string;
+  phoneNumber: string;
+  profileName: string | null;
+  state: string;
+  isVerified: boolean;
+  language: string;
+  leadCategory: string | null;
+  firstSeenAt: string;
+  lastMessageAt: string;
+  messageCount: number;
+  linkedUser: { id: string; email: string; name: string } | null;
+}
+
+interface LeadMessage {
+  id: string;
+  direction: "in" | "out";
+  messageType: string;
+  body: string | null;
+  mediaUrl: string | null;
+  state: string | null;
+  wamid: string | null;
+  createdAt: string;
+}
+
+interface LeadDetail {
+  id: string;
+  phoneNumber: string;
+  profileName: string | null;
+  state: string;
+  isVerified: boolean;
+  language: string;
+  leadCategory: string | null;
+  creditsUsed: number;
+  creditsLimit: number;
+  firstSeenAt: string;
+  lastMessageAt: string;
+  user: { id: string; email: string; name: string } | null;
+  messages: LeadMessage[];
 }
 
 interface UserDetail {
@@ -132,7 +173,7 @@ function Tabs({ tabs, active, onChange }: { tabs: { id: string; label: string; i
 // Main component
 // ──────────────────────────────────────────────────────────────────────────────
 export function Admin() {
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "revenue" | "activity" | "whatsapp" | "codes" | "system">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "users" | "revenue" | "activity" | "whatsapp" | "leads" | "codes" | "system">("overview");
 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [active, setActive] = useState<ActiveUsers | null>(null);
@@ -165,6 +206,16 @@ export function Admin() {
   const [codesLoading, setCodesLoading] = useState(false);
   const [codeForm, setCodeForm] = useState({ code: "", credits: "100", maxRedemptions: "", expiresAt: "", note: "" });
   const [creatingCode, setCreatingCode] = useState(false);
+
+  // Leads tab
+  const [leads, setLeads] = useState<LeadRow[]>([]);
+  const [leadTotal, setLeadTotal] = useState(0);
+  const [leadSearch, setLeadSearch] = useState("");
+  const [leadPage, setLeadPage] = useState(1);
+  const [leadsLoading, setLeadsLoading] = useState(false);
+  const [leadDetail, setLeadDetail] = useState<LeadDetail | null>(null);
+  const [leadDetailLoading, setLeadDetailLoading] = useState(false);
+  const LEAD_PAGE_SIZE = 50;
 
   const loadAll = useCallback(async () => {
     try {
@@ -210,6 +261,29 @@ export function Admin() {
       .finally(() => setUsersLoading(false));
   }, [page, search, roleFilter]);
   useEffect(() => { if (activeTab === "users") loadUsers(); }, [activeTab, loadUsers]);
+
+  const loadLeads = useCallback(() => {
+    setLeadsLoading(true);
+    const params: Record<string, string | number> = { page: leadPage, pageSize: LEAD_PAGE_SIZE };
+    if (leadSearch) params.search = leadSearch;
+    api.get("/admin/whatsapp-leads", { params })
+      .then((r) => { setLeads(r.data.data); setLeadTotal(r.data.total); })
+      .catch(() => toast.error("Failed to load leads"))
+      .finally(() => setLeadsLoading(false));
+  }, [leadPage, leadSearch]);
+  useEffect(() => { if (activeTab === "leads") loadLeads(); }, [activeTab, loadLeads]);
+
+  const openLeadDetail = async (id: string) => {
+    setLeadDetailLoading(true);
+    try {
+      const r = await api.get(`/admin/whatsapp-leads/${id}`);
+      setLeadDetail(r.data.data);
+    } catch {
+      toast.error("Failed to load lead");
+    } finally {
+      setLeadDetailLoading(false);
+    }
+  };
 
   const openDetail = async (userId: string) => {
     setDetailLoading(true);
@@ -336,6 +410,7 @@ export function Admin() {
           { id: "revenue", label: "Revenue", icon: DollarSign },
           { id: "activity", label: "Activity", icon: Activity },
           { id: "whatsapp", label: "WhatsApp", icon: MessageCircle },
+          { id: "leads", label: "Leads", icon: Inbox },
           { id: "codes", label: "AI Codes", icon: Ticket },
           { id: "system", label: "System", icon: Server },
         ]}
@@ -640,6 +715,80 @@ export function Admin() {
         </div>
       )}
 
+      {/* ══════════ LEADS TAB ══════════ */}
+      {activeTab === "leads" && (
+        <Card className="border-slate-200">
+          <CardContent className="p-0">
+            <div className="p-4 border-b border-slate-100 flex items-center gap-3">
+              <div className="relative max-w-xs flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Search phone or name..."
+                  value={leadSearch}
+                  onChange={(e) => { setLeadSearch(e.target.value); setLeadPage(1); }}
+                  className="pl-10"
+                />
+              </div>
+              <span className="text-sm text-slate-500 ml-auto">{leadTotal.toLocaleString()} total</span>
+            </div>
+            {leadsLoading ? (
+              <div className="p-8 text-center text-sm text-slate-400">Loading...</div>
+            ) : leads.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-400">No leads match</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-100">
+                    <tr className="text-left text-slate-500 text-xs uppercase tracking-wide">
+                      <th className="px-4 py-2.5 font-semibold">Name</th>
+                      <th className="px-4 py-2.5 font-semibold">Phone</th>
+                      <th className="px-4 py-2.5 font-semibold">State</th>
+                      <th className="px-4 py-2.5 font-semibold">Lang</th>
+                      <th className="px-4 py-2.5 font-semibold">Msgs</th>
+                      <th className="px-4 py-2.5 font-semibold">First seen</th>
+                      <th className="px-4 py-2.5 font-semibold">Last msg</th>
+                      <th className="px-4 py-2.5"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leads.map((l) => (
+                      <tr key={l.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+                        <td className="px-4 py-3 font-medium text-slate-900">
+                          {l.profileName || <span className="text-slate-400">—</span>}
+                          {l.linkedUser && (
+                            <Badge variant="secondary" className="ml-2 bg-teal-100 text-teal-700">user</Badge>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 font-mono text-xs">{l.phoneNumber}</td>
+                        <td className="px-4 py-3">
+                          <Badge variant="secondary" className="bg-slate-100 text-slate-700">{l.state}</Badge>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500 text-xs uppercase">{l.language}</td>
+                        <td className="px-4 py-3 text-slate-600">{l.messageCount}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">{new Date(l.firstSeenAt).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">{new Date(l.lastMessageAt).toLocaleString()}</td>
+                        <td className="px-4 py-3 text-right">
+                          <Button variant="ghost" size="sm" onClick={() => openLeadDetail(l.id)} className="h-7 px-2">
+                            <ArrowUpRight className="h-3.5 w-3.5" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="p-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span>Page {leadPage} of {Math.max(1, Math.ceil(leadTotal / LEAD_PAGE_SIZE))}</span>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={leadPage === 1} onClick={() => setLeadPage(leadPage - 1)}>Previous</Button>
+                <Button variant="outline" size="sm" disabled={leadPage >= Math.ceil(leadTotal / LEAD_PAGE_SIZE)} onClick={() => setLeadPage(leadPage + 1)}>Next</Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* ══════════ SYSTEM TAB ══════════ */}
       {/* ══════════ AI CODES TAB ══════════ */}
       {activeTab === "codes" && (
@@ -901,6 +1050,73 @@ export function Admin() {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!leadDetail || leadDetailLoading} onOpenChange={(open) => { if (!open) setLeadDetail(null); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Lead Details</DialogTitle></DialogHeader>
+          {leadDetailLoading || !leadDetail ? (
+            <div className="p-8 text-center text-sm text-slate-400">Loading...</div>
+          ) : (
+            <div className="space-y-5">
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Identity</p>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div><span className="text-slate-500">Profile name</span><p className="font-medium text-slate-900">{leadDetail.profileName || "—"}</p></div>
+                  <div><span className="text-slate-500">Phone</span><p className="font-mono text-slate-900">{leadDetail.phoneNumber}</p></div>
+                  <div><span className="text-slate-500">State</span><p className="text-slate-900">{leadDetail.state}</p></div>
+                  <div><span className="text-slate-500">Language</span><p className="text-slate-900 uppercase">{leadDetail.language}</p></div>
+                  <div><span className="text-slate-500">First seen</span><p className="text-slate-900">{new Date(leadDetail.firstSeenAt).toLocaleString()}</p></div>
+                  <div><span className="text-slate-500">Last message</span><p className="text-slate-900">{new Date(leadDetail.lastMessageAt).toLocaleString()}</p></div>
+                  <div><span className="text-slate-500">Credits</span><p className="text-slate-900">{leadDetail.creditsUsed}/{leadDetail.creditsLimit}</p></div>
+                  <div>
+                    <span className="text-slate-500">Linked user</span>
+                    <p className="text-slate-900">{leadDetail.user ? `${leadDetail.user.name} (${leadDetail.user.email})` : <span className="text-slate-400">guest</span>}</p>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Conversation ({leadDetail.messages.length})</p>
+                {leadDetail.messages.length === 0 ? (
+                  <p className="text-sm text-slate-400">No messages logged yet.</p>
+                ) : (
+                  <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                    {leadDetail.messages.map((m) => (
+                      <div
+                        key={m.id}
+                        className={`flex ${m.direction === "in" ? "justify-start" : "justify-end"}`}
+                      >
+                        <div
+                          className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                            m.direction === "in"
+                              ? "bg-slate-100 text-slate-900"
+                              : "bg-teal-600 text-white"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide opacity-70 mb-0.5">
+                            <span>{m.direction === "in" ? "merchant" : "bot"}</span>
+                            <span>·</span>
+                            <span>{m.messageType}</span>
+                            {m.state && <><span>·</span><span>{m.state}</span></>}
+                          </div>
+                          {m.body ? (
+                            <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                          ) : (
+                            <p className="italic opacity-70">[no body]</p>
+                          )}
+                          {m.mediaUrl && (
+                            <p className="text-[10px] opacity-70 mt-1 font-mono break-all">media: {m.mediaUrl}</p>
+                          )}
+                          <p className="text-[10px] opacity-60 mt-1">{new Date(m.createdAt).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </DialogContent>

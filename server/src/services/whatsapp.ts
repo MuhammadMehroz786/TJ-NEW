@@ -1,3 +1,5 @@
+import { logOutboundIfPossible } from "./whatsappLog";
+
 export interface WhatsAppSendTextParams {
   to: string;
   body: string;
@@ -12,6 +14,8 @@ export interface WhatsAppSendButtonsParams {
 export interface IncomingWhatsAppMessage {
   from: string;
   type: string;
+  wamid?: string;
+  profileName?: string;
   text?: string;
   imageId?: string;
   interactiveReplyId?: string;
@@ -35,7 +39,7 @@ function getGraphApiUrl(): string {
   return `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
 }
 
-export async function sendWhatsAppTextMessage(params: WhatsAppSendTextParams): Promise<void> {
+export async function sendWhatsAppTextMessage(params: WhatsAppSendTextParams): Promise<string | null> {
   const token = getRequiredEnv("WHATSAPP_TOKEN");
   const url = getGraphApiUrl();
   const payload = {
@@ -58,9 +62,13 @@ export async function sendWhatsAppTextMessage(params: WhatsAppSendTextParams): P
     const message = await response.text();
     throw new Error(`WhatsApp send failed: ${message}`);
   }
+  const data = (await response.json()) as { messages?: Array<{ id: string }> };
+  const wamid = data.messages?.[0]?.id || null;
+  await logOutboundIfPossible({ to: params.to, messageType: "text", body: params.body, wamid });
+  return wamid;
 }
 
-export async function sendWhatsAppButtonsMessage(params: WhatsAppSendButtonsParams): Promise<void> {
+export async function sendWhatsAppButtonsMessage(params: WhatsAppSendButtonsParams): Promise<string | null> {
   const token = getRequiredEnv("WHATSAPP_TOKEN");
   const url = getGraphApiUrl();
   const payload = {
@@ -92,6 +100,10 @@ export async function sendWhatsAppButtonsMessage(params: WhatsAppSendButtonsPara
     const message = await response.text();
     throw new Error(`WhatsApp buttons send failed: ${message}`);
   }
+  const data = (await response.json()) as { messages?: Array<{ id: string }> };
+  const wamid = data.messages?.[0]?.id || null;
+  await logOutboundIfPossible({ to: params.to, messageType: "interactive", body: params.body, wamid });
+  return wamid;
 }
 
 export function normalizePhoneNumber(raw: string): string {
@@ -173,7 +185,15 @@ export async function sendWhatsAppImageById(params: { to: string; mediaId: strin
     throw new Error(`WhatsApp image send failed: ${await response.text()}`);
   }
   const data = (await response.json()) as { messages?: Array<{ id: string }> };
-  return data.messages?.[0]?.id || null;
+  const wamid = data.messages?.[0]?.id || null;
+  await logOutboundIfPossible({
+    to: params.to,
+    messageType: "image",
+    body: params.caption,
+    mediaUrl: params.mediaId,
+    wamid,
+  });
+  return wamid;
 }
 
 export function extractIncomingMessages(payload: any): IncomingWhatsAppMessage[] {
@@ -184,13 +204,25 @@ export function extractIncomingMessages(payload: any): IncomingWhatsAppMessage[]
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     for (const change of changes) {
       const messages = Array.isArray(change?.value?.messages) ? change.value.messages : [];
+      const contacts = Array.isArray(change?.value?.contacts) ? change.value.contacts : [];
+      const profileByPhone = new Map<string, string>();
+      for (const contact of contacts) {
+        const wa = normalizePhoneNumber(String(contact?.wa_id || ""));
+        const name = contact?.profile?.name;
+        if (wa && typeof name === "string" && name.length > 0) {
+          profileByPhone.set(wa, name);
+        }
+      }
       for (const message of messages) {
         const from = String(message?.from || "");
         const type = String(message?.type || "");
         if (!from || !type) continue;
+        const normalizedFrom = normalizePhoneNumber(from);
         result.push({
-          from: normalizePhoneNumber(from),
+          from: normalizedFrom,
           type,
+          wamid: typeof message?.id === "string" ? message.id : undefined,
+          profileName: profileByPhone.get(normalizedFrom),
           text: message?.text?.body,
           imageId: message?.image?.id,
           interactiveReplyId: message?.interactive?.button_reply?.id || message?.interactive?.list_reply?.id,

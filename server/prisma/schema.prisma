@@ -277,6 +277,8 @@ model AiStudioFolder {
 model WhatsAppSession {
   id                 String    @id @default(uuid())
   phoneNumber        String    @unique
+  profileName        String?
+  leadCategory       String?
   userId             String?
   creditsUsed        Int       @default(0)
   creditsLimit       Int       @default(5)
@@ -293,14 +295,32 @@ model WhatsAppSession {
   lastSourceImage    String?   @db.Text
   lastSourceMimeType String?
   lastMessageAt      DateTime  @default(now())
+  firstSeenAt        DateTime  @default(now())
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
   enhancements WhatsAppEnhancement[]
+  messages     WhatsAppMessage[]
 
   @@index([state, lastMessageAt])
   @@index([userId])
+}
+
+model WhatsAppMessage {
+  id          String   @id @default(uuid())
+  sessionId   String
+  direction   String
+  wamid       String?  @unique
+  messageType String
+  body        String?  @db.Text
+  mediaUrl    String?  @db.Text
+  state       String?
+  createdAt   DateTime @default(now())
+
+  session WhatsAppSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
 }
 
 // Tracks every enhancement the bot sent to a merchant, keyed by the outbound

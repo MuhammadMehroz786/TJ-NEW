@@ -632,4 +632,98 @@ router.get("/ai-credit-codes/:id/redemptions", async (req: AuthRequest, res: Res
   }
 });
 
+// ── GET /api/admin/whatsapp-leads — paginated session list with msg counts ────
+router.get("/whatsapp-leads", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
+    const pageSize = Math.min(100, Math.max(1, parseInt((req.query.pageSize as string) || "50", 10)));
+    const search = String(req.query.search || "").trim();
+
+    const where: Prisma.WhatsAppSessionWhereInput = {};
+    if (search) {
+      where.OR = [
+        { phoneNumber: { contains: search } },
+        { profileName: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    const [sessions, total] = await Promise.all([
+      prisma.whatsAppSession.findMany({
+        where,
+        orderBy: { lastMessageAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          phoneNumber: true,
+          profileName: true,
+          state: true,
+          isVerified: true,
+          language: true,
+          leadCategory: true,
+          firstSeenAt: true,
+          lastMessageAt: true,
+          _count: { select: { messages: true } },
+          user: { select: { id: true, email: true, name: true } },
+        },
+      }),
+      prisma.whatsAppSession.count({ where }),
+    ]);
+
+    const data = sessions.map((s) => ({
+      id: s.id,
+      phoneNumber: s.phoneNumber,
+      profileName: s.profileName,
+      state: s.state,
+      isVerified: s.isVerified,
+      language: s.language,
+      leadCategory: s.leadCategory,
+      firstSeenAt: s.firstSeenAt,
+      lastMessageAt: s.lastMessageAt,
+      messageCount: s._count.messages,
+      linkedUser: s.user,
+    }));
+
+    res.json({ data, total, page, pageSize });
+  } catch (err) {
+    console.error("[admin] whatsapp-leads list error:", err);
+    res.status(500).json({ error: "Failed to load leads", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── GET /api/admin/whatsapp-leads/:id — full session + message log ────────────
+router.get("/whatsapp-leads/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const session = await prisma.whatsAppSession.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, email: true, name: true } },
+        messages: {
+          orderBy: { createdAt: "asc" },
+          take: 500,
+          select: {
+            id: true,
+            direction: true,
+            messageType: true,
+            body: true,
+            mediaUrl: true,
+            state: true,
+            wamid: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+    if (!session) {
+      res.status(404).json({ error: "Session not found", code: "NOT_FOUND" });
+      return;
+    }
+    res.json({ data: session });
+  } catch (err) {
+    console.error("[admin] whatsapp-leads detail error:", err);
+    res.status(500).json({ error: "Failed to load lead detail", code: "INTERNAL_ERROR" });
+  }
+});
+
 export default router;

@@ -24,6 +24,7 @@ import { refineProductImage, sanitizeInstruction } from "../services/imageRefine
 import { addImageToBatch, type PendingImage } from "../services/whatsappBatch";
 import { t, plural, resolveLang, type Lang } from "../services/whatsappI18n";
 import { saveEnhancementToLibrary } from "../lib/imageStorage";
+import { logInboundMessage } from "../services/whatsappLog";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -384,17 +385,40 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
         session = await prisma.whatsAppSession.create({
           data: {
             phoneNumber: from,
+            profileName: message.profileName ?? null,
             state: STATES.AWAITING_LANGUAGE,
             lastMessageAt: now,
           },
+        });
+        await logInboundMessage({
+          sessionId: session.id,
+          wamid: message.wamid ?? null,
+          messageType: message.type,
+          body: message.text ?? message.interactiveReplyTitle ?? null,
+          mediaUrl: message.imageId ?? null,
+          state: session.state,
         });
         await sendLanguageGate(from);
         continue;
       }
 
-      await prisma.whatsAppSession.update({
+      session = await prisma.whatsAppSession.update({
         where: { id: session.id },
-        data: { lastMessageAt: now },
+        data: {
+          lastMessageAt: now,
+          ...(message.profileName && message.profileName !== session.profileName
+            ? { profileName: message.profileName }
+            : {}),
+        },
+      });
+
+      await logInboundMessage({
+        sessionId: session.id,
+        wamid: message.wamid ?? null,
+        messageType: message.type,
+        body: message.text ?? message.interactiveReplyTitle ?? null,
+        mediaUrl: message.imageId ?? null,
+        state: session.state,
       });
 
       // Language gate — pending first-time choice. Accept "1" / "2" / "en" / "ar"
