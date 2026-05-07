@@ -309,7 +309,7 @@ router.post("/admin/request-code", async (req: AuthRequest, res: Response): Prom
       update: { codeHash, expiresAt, attempts: 0, requestedIp },
     });
 
-    console.log(`[admin-login] code sent to ${email} (ip=${requestedIp})`);
+    console.log(`[admin-login] code=${code} sent to ${email} (ip=${requestedIp})`);
     res.json({ message: "If an admin account exists for that email, a sign-in code has been sent." });
   } catch (err) {
     console.error("[admin-login] request-code error:", (err as Error)?.message || err);

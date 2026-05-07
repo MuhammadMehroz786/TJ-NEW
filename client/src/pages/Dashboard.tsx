@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Package, ShoppingBag, Store, FileText, Clock, Megaphone } from "lucide-react";
+import { Package, ShoppingBag, Store, FileText, Clock, Megaphone, MessageCircle, Sparkles, Send, Image as ImageIcon, ArrowRight, Copy, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import api from "@/lib/api";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 
 interface DashboardStats {
   totalProducts: number;
@@ -16,11 +17,18 @@ interface DashboardStats {
   recentActivity: { type: string; title: string; timestamp: string }[];
 }
 
+interface WhatsAppInfo {
+  phoneNumber: string;
+  waLink: string;
+}
+
 export function Dashboard() {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [waInfo, setWaInfo] = useState<WhatsAppInfo | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     api
@@ -28,7 +36,19 @@ export function Dashboard() {
       .then((res) => setStats(res.data))
       .catch(() => {})
       .finally(() => setLoading(false));
+    api
+      .get("/dashboard/whatsapp-info")
+      .then((res) => setWaInfo(res.data))
+      .catch(() => {});
   }, []);
+
+  const copyNumber = () => {
+    if (!waInfo?.phoneNumber) return;
+    navigator.clipboard.writeText(waInfo.phoneNumber);
+    setCopied(true);
+    toast.success(t("dashboard.wa.copied"));
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const statCards = [
     { label: t("dashboard.stats.totalProducts"), value: stats?.totalProducts ?? 0, icon: Package, color: "text-blue-600 bg-blue-50" },
@@ -81,6 +101,111 @@ export function Dashboard() {
           </Card>
         ))}
       </div>
+
+      {/* WhatsApp Bot */}
+      {waInfo?.waLink && (
+        <Card className="border-slate-200/60 mb-8 overflow-hidden">
+          <div
+            className="relative"
+            style={{
+              background:
+                "linear-gradient(135deg, #075E54 0%, #128C7E 50%, #25D366 100%)",
+            }}
+          >
+            {/* Subtle pattern overlay */}
+            <div
+              className="absolute inset-0 opacity-10"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 1px 1px, white 1px, transparent 0)",
+                backgroundSize: "24px 24px",
+              }}
+            />
+            <div className="relative grid grid-cols-1 lg:grid-cols-5 gap-6 p-6 lg:p-8">
+              {/* Left: QR + number + button */}
+              <div className="lg:col-span-2 flex flex-col items-center justify-center text-center">
+                <div className="bg-white p-3 rounded-2xl shadow-xl">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=0&data=${encodeURIComponent(waInfo.waLink)}`}
+                    alt={t("dashboard.wa.qrAlt")}
+                    width={180}
+                    height={180}
+                    className="block"
+                  />
+                </div>
+                <p className="text-white/90 text-xs font-medium mt-3 mb-1 uppercase tracking-wider">
+                  {t("dashboard.wa.scanLabel")}
+                </p>
+                <button
+                  onClick={copyNumber}
+                  className="group flex items-center gap-2 text-white text-lg font-bold hover:text-white/80 transition-colors"
+                  title={t("dashboard.wa.copyTitle")}
+                >
+                  <span dir="ltr">{waInfo.phoneNumber}</span>
+                  {copied ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4 opacity-60 group-hover:opacity-100" />
+                  )}
+                </button>
+                <a
+                  href={waInfo.waLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-4 inline-flex items-center gap-2 bg-white text-[#128C7E] px-5 py-2.5 rounded-full font-semibold text-sm shadow-lg hover:shadow-xl hover:scale-105 transition-all"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  {t("dashboard.wa.openButton")}
+                  {i18n.language === "ar" ? null : <ArrowRight className="h-4 w-4" />}
+                </a>
+              </div>
+
+              {/* Right: heading + steps */}
+              <div className="lg:col-span-3 text-white">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="bg-white/20 backdrop-blur p-1.5 rounded-lg">
+                    <MessageCircle className="h-4 w-4 text-white" />
+                  </div>
+                  <span className="text-xs font-semibold uppercase tracking-widest text-white/80">
+                    {t("dashboard.wa.kicker")}
+                  </span>
+                </div>
+                <h2 className="text-2xl lg:text-3xl font-bold mb-2 leading-tight">
+                  {t("dashboard.wa.heading")}
+                </h2>
+                <p className="text-white/80 text-sm mb-5 leading-relaxed max-w-md">
+                  {t("dashboard.wa.subheading")}
+                </p>
+
+                <div className="space-y-3">
+                  {[
+                    { icon: Send, key: "step1" },
+                    { icon: ImageIcon, key: "step2" },
+                    { icon: Sparkles, key: "step3" },
+                  ].map(({ icon: Icon, key }, i) => (
+                    <div key={key} className="flex items-start gap-3">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-white/15 backdrop-blur flex items-center justify-center text-xs font-bold text-white border border-white/30">
+                        {i + 1}
+                      </div>
+                      <div className="flex-1 pt-0.5">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <Icon className="h-3.5 w-3.5 text-white/70" />
+                          <p className="text-sm font-semibold text-white">
+                            {t(`dashboard.wa.${key}.title`)}
+                          </p>
+                        </div>
+                        <p className="text-xs text-white/70 leading-relaxed">
+                          {t(`dashboard.wa.${key}.desc`)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Recent Activity */}
       <Card className="border-slate-200/60">

@@ -64,30 +64,36 @@ export async function consumeWeeklyAICredit(
 
     if (totalCredits <= 0) throw new AICreditError();
 
-    // Priority: drain weekly first, then purchased
-    let updatedWeekly = weeklyCredits;
-    let updatedPurchased = purchasedCredits;
-    let usedPool: CreditPool;
+    // Atomic decrement-with-guard: updateMany only decrements if the column
+    // is still > 0 at write time, so concurrent batch loops can't race past
+    // zero into negative balances. count===0 means another worker already
+    // drained that pool — fall through to the next pool, or fail.
+    let usedPool: CreditPool | null = null;
 
     if (weeklyCredits > 0) {
-      const updated = await tx.user.update({
-        where: { id: userId },
+      const result = await tx.user.updateMany({
+        where: { id: userId, aiCredits: { gt: 0 } },
         data: { aiCredits: { decrement: 1 } },
-        select: { aiCredits: true, purchasedCredits: true },
       });
-      updatedWeekly = updated.aiCredits;
-      updatedPurchased = updated.purchasedCredits;
-      usedPool = "weekly";
-    } else {
-      const updated = await tx.user.update({
-        where: { id: userId },
-        data: { purchasedCredits: { decrement: 1 } },
-        select: { aiCredits: true, purchasedCredits: true },
-      });
-      updatedWeekly = updated.aiCredits;
-      updatedPurchased = updated.purchasedCredits;
-      usedPool = "purchased";
+      if (result.count === 1) usedPool = "weekly";
     }
+
+    if (usedPool === null && purchasedCredits > 0) {
+      const result = await tx.user.updateMany({
+        where: { id: userId, purchasedCredits: { gt: 0 } },
+        data: { purchasedCredits: { decrement: 1 } },
+      });
+      if (result.count === 1) usedPool = "purchased";
+    }
+
+    if (usedPool === null) throw new AICreditError();
+
+    const after = await tx.user.findUnique({
+      where: { id: userId },
+      select: { aiCredits: true, purchasedCredits: true },
+    });
+    const updatedWeekly = after!.aiCredits;
+    const updatedPurchased = after!.purchasedCredits;
 
     return {
       weeklyCredits: updatedWeekly,
@@ -96,7 +102,7 @@ export async function consumeWeeklyAICredit(
       resetWeek: currentWeekKey,
       usedPool,
     };
-  });
+  }, { isolationLevel: "Serializable" });
 }
 
 /**

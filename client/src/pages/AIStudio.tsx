@@ -88,19 +88,59 @@ export function AIStudio() {
   const [bulkProductResults, setBulkProductResults] = useState<Array<{ id: string; title: string; images?: string[] }>>([]);
   const [bulkProductLoading, setBulkProductLoading] = useState(false);
   const [bulkActionRunning, setBulkActionRunning] = useState(false);
+  const [imageTotal, setImageTotal] = useState(0);
+  const [imagePage, setImagePage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const IMAGES_PER_PAGE = 200;
 
-  const fetchFolders = useCallback(() => {
-    api.get("/ai-studio/folders").then((res) => setFolders(res.data || [])).catch(() => toast.error("Failed to load folders"));
+  const fetchFolders = useCallback((silent = false) => {
+    return api
+      .get("/ai-studio/folders")
+      .then((res) => setFolders(res.data || []))
+      .catch((err) => {
+        // The result-subscription handler calls this after every enhance/pack
+        // result, so a transient blip during a heavy bulk run shouldn't pop
+        // a scary toast — log it and let the next call recover.
+        if (silent) {
+          console.warn("Failed to refresh folders (silent):", err);
+        } else {
+          toast.error("Failed to load folders");
+        }
+      });
   }, []);
 
   const fetchImages = useCallback(() => {
     setLoading(true);
+    setImagePage(1);
     api
-      .get("/ai-studio/images", { params: { page: 1, pageSize: 200 } })
-      .then((res) => setImages(res.data.data || []))
+      .get("/ai-studio/images", { params: { page: 1, pageSize: IMAGES_PER_PAGE } })
+      .then((res) => {
+        setImages(res.data.data || []);
+        setImageTotal(res.data.total || 0);
+      })
       .catch(() => toast.error("Failed to load AI Studio images"))
       .finally(() => setLoading(false));
   }, []);
+
+  const loadMoreImages = useCallback(() => {
+    const nextPage = imagePage + 1;
+    setLoadingMore(true);
+    api
+      .get("/ai-studio/images", { params: { page: nextPage, pageSize: IMAGES_PER_PAGE } })
+      .then((res) => {
+        // Append while filtering duplicates that might've been added since the
+        // first page was fetched (e.g. a freshly enhanced image landed on top).
+        setImages((prev) => {
+          const seen = new Set(prev.map((i) => i.id));
+          const fresh = (res.data.data || []).filter((i: AiStudioImage) => !seen.has(i.id));
+          return [...prev, ...fresh];
+        });
+        setImageTotal(res.data.total || 0);
+        setImagePage(nextPage);
+      })
+      .catch(() => toast.error("Failed to load older images"))
+      .finally(() => setLoadingMore(false));
+  }, [imagePage]);
 
   useEffect(() => {
     fetchFolders();
@@ -129,7 +169,7 @@ export function AIStudio() {
         if (typeof r.remainingCredits === "number") setAiCredits(r.remainingCredits);
         if (typeof r.weeklyCredits === "number") setWeeklyCredits(r.weeklyCredits);
         if (typeof r.purchasedCredits === "number") setPurchasedCredits(r.purchasedCredits);
-        fetchFolders();
+        fetchFolders(true);
 
         if (r.scenesGenerated > 0 && r.failures.length === 0) {
           toast.success(`Pack ready — ${r.scenesGenerated} shots generated`);
@@ -146,7 +186,7 @@ export function AIStudio() {
       if (typeof r.remainingCredits === "number") setAiCredits(r.remainingCredits);
       if (typeof r.weeklyCredits === "number") setWeeklyCredits(r.weeklyCredits);
       if (typeof r.purchasedCredits === "number") setPurchasedCredits(r.purchasedCredits);
-      fetchFolders();
+      fetchFolders(true);
 
       if (r.job.type === "refine" && r.refineSourceImageId) {
         setPreviewImage((current) => {
@@ -776,6 +816,22 @@ export function AIStudio() {
                     );
                   })}
                 </div>
+                {imageTotal > images.length && (
+                  <div className="flex flex-col items-center gap-2 pt-4">
+                    <p className="text-xs text-slate-500">
+                      Showing {images.length} of {imageTotal} images
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadMoreImages}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : null}
+                      {loadingMore ? "Loading..." : `Load older (${imageTotal - images.length} remaining)`}
+                    </Button>
+                  </div>
+                )}
                 </>
               )}
             </div>

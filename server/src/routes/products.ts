@@ -694,6 +694,34 @@ router.post("/bulk-enhance", async (req: AuthRequest, res: Response): Promise<vo
         });
     const foundMap = new Map<string, typeof products[number]>(products.map((p) => [p.id, p]));
 
+    // Pre-flight credit gate. Each enhanced image costs 1 credit. With
+    // allImages=true we charge per image; otherwise just the first per product.
+    // Refusing the whole batch upfront is cleaner than the previous behaviour
+    // where credits would silently run out mid-batch and leave the merchant
+    // confused about why some products enhanced and others didn't.
+    const requiredCredits = allImages
+      ? products.reduce((sum, p) => {
+          const validUrls = ((p.images || []) as unknown[]).filter(
+            (u): u is string => typeof u === "string" && u.length > 0,
+          );
+          return sum + Math.max(1, validUrls.length);
+        }, 0)
+      : products.length;
+    const preflight = await prisma.user.findUnique({
+      where: { id: req.auth!.userId },
+      select: { aiCredits: true, purchasedCredits: true },
+    });
+    const available = (preflight?.aiCredits ?? 0) + (preflight?.purchasedCredits ?? 0);
+    if (available < requiredCredits) {
+      res.status(403).json({
+        error: `Not enough credits. You need ${requiredCredits} but only have ${available}. Buy more or reduce the batch.`,
+        code: "AI_CREDITS_EXHAUSTED",
+        available,
+        required: requiredCredits,
+      });
+      return;
+    }
+
     const succeeded: { productId: string; enhancedImageUrl: string; newProductId?: string }[] = [];
     const failed: { productId: string; error: string }[] = [];
     let lastRemainingCredits: number | null = null;

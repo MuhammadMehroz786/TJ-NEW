@@ -259,6 +259,7 @@
     "noRecent": "No recent transactions yet",
     "noRecentSub": "Select a plan to get started",
     "redeemTitle": "Have a code?",
+    "redeemSubtitle": "Redeem promo codes for free credits",
     "redeemPlaceholder": "Enter your code",
     "redeemButton": "Redeem",
     "redeemSuccess": "{{n}} credits added!",
@@ -286,7 +287,29 @@
     "timeJustNow": "Just now",
     "timeMinutes": "{{n}}m ago",
     "timeHours": "{{n}}h ago",
-    "timeDays": "{{n}}d ago"
+    "timeDays": "{{n}}d ago",
+    "wa": {
+      "kicker": "WhatsApp Studio",
+      "heading": "Enhance product photos right from WhatsApp",
+      "subheading": "No app to install. Just message us a photo and get a polished, marketplace-ready shot back in seconds.",
+      "scanLabel": "Scan to chat",
+      "openButton": "Open WhatsApp",
+      "copyTitle": "Tap to copy number",
+      "copied": "Number copied",
+      "qrAlt": "Scan to chat with TijarFlow on WhatsApp",
+      "step1": {
+        "title": "Save the number & say hi",
+        "desc": "Add the number above, send any message to start. We'll greet you in your language."
+      },
+      "step2": {
+        "title": "Send a product photo",
+        "desc": "Snap or upload any product photo. Optionally caption with a scene like \"kitchen\" or \"outdoor\"."
+      },
+      "step3": {
+        "title": "Get an enhanced shot back",
+        "desc": "We replace the background with a pro studio scene and reply within seconds. Reply to the photo to refine it further."
+      }
+    }
   },
   "settings": {
     "title": "Settings",

@@ -1,9 +1,21 @@
-import { Router, Response } from "express";
+import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authenticate, AuthRequest } from "../middleware/auth";
 
 const router = Router();
 const prisma = new PrismaClient();
+
+// Public endpoint — exposes our public WhatsApp number so the merchant
+// dashboard can render a tap-to-chat link and QR code. Registered BEFORE
+// `router.use(authenticate)` so it doesn't require a token.
+router.get("/whatsapp-info", (_req: Request, res: Response): void => {
+  const phoneNumber = process.env.WHATSAPP_PHONE_NUMBER || "";
+  const waNumber = phoneNumber.replace(/[^0-9]/g, "");
+  res.json({
+    phoneNumber,
+    waLink: waNumber ? `https://wa.me/${waNumber}` : "",
+  });
+});
 
 router.use(authenticate);
 

@@ -885,15 +885,24 @@ export function Products() {
   const handlePush = async (productIds: string[], connectionId: string) => {
     setPushing(true);
     try {
-      const res = await api.post("/products/push", { productIds, connectionId });
+      const res = await api.post(
+        "/products/push",
+        { productIds, connectionId },
+        { timeout: 600_000 },
+      );
       toast.success(res.data.message);
       setSelectedIds(new Set());
       fetchProducts();
     } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-        "Failed to push products";
-      toast.error(message);
+      const e = err as { code?: string; response?: { status?: number; data?: { error?: string } } };
+      if (e?.response?.data?.error) {
+        toast.error(e.response.data.error);
+      } else if (e?.code === "ECONNABORTED" || !e?.response) {
+        toast.error("Push is taking longer than expected — refresh the page in a moment to see if it completed.");
+        fetchProducts();
+      } else {
+        toast.error("Failed to push products");
+      }
     } finally {
       setPushing(false);
     }

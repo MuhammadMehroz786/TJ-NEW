@@ -1049,6 +1049,25 @@ router.post("/images/bulk-enhance", async (req: AuthRequest, res: Response): Pro
     });
     const foundMap = new Map(rows.map((r) => [r.id, r]));
 
+    // Pre-flight credit gate. Refuse the whole batch if the user can't afford
+    // every image — better to fail fast with a clear "you need N more credits"
+    // than to enhance some, fail the rest, and leave the merchant confused
+    // about why their balance went down without all images appearing.
+    const preflight = await prisma.user.findUnique({
+      where: { id: req.auth!.userId },
+      select: { aiCredits: true, purchasedCredits: true },
+    });
+    const available = (preflight?.aiCredits ?? 0) + (preflight?.purchasedCredits ?? 0);
+    if (available < ids.length) {
+      res.status(403).json({
+        error: `Not enough credits. You need ${ids.length} but only have ${available}. Buy more or reduce the batch.`,
+        code: "AI_CREDITS_EXHAUSTED",
+        available,
+        required: ids.length,
+      });
+      return;
+    }
+
     const succeeded: { sourceId: string; newId: string; enhancedImageUrl: string }[] = [];
     const failed: { sourceId: string; error: string }[] = [];
     let lastRemaining: number | null = null;

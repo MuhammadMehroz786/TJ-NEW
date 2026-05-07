@@ -12,9 +12,11 @@ import {
   Plus,
   ChevronRight,
   ChevronLeft,
+  Ticket,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useTranslation } from "react-i18next";
@@ -350,26 +352,63 @@ export function Billing() {
             </p>
           </div>
 
-          {/* Redeem code */}
-          <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <p className="text-xs font-semibold text-slate-700 mb-2">{t("billing.redeemTitle")}</p>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={redeemCode}
-                onChange={(e) => setRedeemCode(e.target.value.toUpperCase().slice(0, 40))}
-                onKeyDown={(e) => { if (e.key === "Enter") handleRedeem(); }}
-                placeholder={t("billing.redeemPlaceholder")}
-                disabled={redeeming}
-                className="flex-1 h-9 px-3 text-sm font-mono uppercase tracking-wider border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:opacity-50"
-              />
-              <Button
-                onClick={handleRedeem}
-                disabled={redeeming || redeemCode.trim().length < 3}
-                className="h-9 bg-teal-600 hover:bg-teal-700 text-white"
-              >
-                {redeeming ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : t("billing.redeemButton")}
-              </Button>
+          {/* Redeem code — gift-card styled block. Teal/emerald gradient + ticket
+              motif so it visually invites a code rather than reading as a plain
+              form, and the dashed border under the input reinforces the
+              "fill in your code" affordance. */}
+          <div
+            className="relative rounded-xl overflow-hidden"
+            style={{ boxShadow: cardShadow }}
+          >
+            <div
+              className="relative p-4"
+              style={{
+                background: "linear-gradient(135deg, #0F766E 0%, #0D9488 50%, #10B981 100%)",
+              }}
+            >
+              {/* Decorative ticket "punch" notches on the sides */}
+              <div className="absolute -left-2 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-slate-50" />
+              <div className="absolute -right-2 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-slate-50" />
+
+              <div className="flex items-center gap-2 mb-3">
+                <div className="bg-white/20 backdrop-blur p-1.5 rounded-lg">
+                  <Ticket className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white leading-tight">
+                    {t("billing.redeemTitle")}
+                  </p>
+                  <p className="text-[11px] text-white/70 leading-tight mt-0.5">
+                    {t("billing.redeemSubtitle")}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={redeemCode}
+                  onChange={(e) => setRedeemCode(e.target.value.toUpperCase().slice(0, 40))}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleRedeem(); }}
+                  placeholder={t("billing.redeemPlaceholder")}
+                  disabled={redeeming}
+                  className="flex-1 h-10 px-3 text-sm font-mono uppercase tracking-[0.15em] bg-white/95 placeholder:text-slate-400 placeholder:tracking-normal placeholder:font-sans border-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-white/60 disabled:opacity-50"
+                />
+                <Button
+                  onClick={handleRedeem}
+                  disabled={redeeming || redeemCode.trim().length < 3}
+                  className="h-10 px-4 bg-white text-teal-700 hover:bg-white/90 font-semibold shadow-sm disabled:bg-white/60 disabled:text-teal-700/60"
+                >
+                  {redeeming ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      {t("billing.redeemButton")}
+                    </span>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

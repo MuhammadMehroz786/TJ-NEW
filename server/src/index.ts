@@ -13,6 +13,7 @@ for (const name of requiredEnvAtStart) {
 
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import path from "path";
 import authRoutes from "./routes/auth";
@@ -39,6 +40,25 @@ const PORT = process.env.PORT || 3001;
 // Behind nginx on the VPS — trust the immediate proxy for X-Forwarded-For so
 // express-rate-limit can key on the real client IP instead of 127.0.0.1.
 app.set("trust proxy", 1);
+
+// Helmet — defense-in-depth HTTP security headers at the Node layer. nginx
+// already sets HSTS / X-Frame-Options / X-Content-Type-Options / Referrer-Policy
+// on the static client, but the API responses come straight from Node so they
+// need their own coverage, AND if we ever change reverse proxy these headers
+// survive the move. Notes on the disabled bits:
+//   • contentSecurityPolicy: CSP for an API that serves only JSON would just
+//     produce noise in dev tools. The SPA gets its CSP via nginx if/when we
+//     decide to add one — that's the right layer for it.
+//   • crossOriginResourcePolicy: the QR-code <img> on /dashboard loads from
+//     api.qrserver.com. Helmet's default `same-origin` CORP would block it.
+//   • crossOriginEmbedderPolicy: not enabling COEP because it requires every
+//     subresource to opt-in via CORP, and we mix in third-party images.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+app.disable("x-powered-by");
 
 const allowedOrigins = [
   "http://localhost:5173",
