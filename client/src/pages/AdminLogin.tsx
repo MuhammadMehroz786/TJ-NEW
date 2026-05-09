@@ -104,7 +104,7 @@ export function AdminLogin() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="admin@tijarflow.com"
+                  placeholder="you@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
