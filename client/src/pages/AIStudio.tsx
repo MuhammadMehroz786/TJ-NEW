@@ -57,6 +57,7 @@ export function AIStudio() {
   const [loading, setLoading] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [background, setBackground] = useState("studio");
+  const [scenePrompt, setScenePrompt] = useState("");
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<string>("all");
   const [newFolderName, setNewFolderName] = useState("");
@@ -233,16 +234,20 @@ export function AIStudio() {
     const images = selectedImages;
     const folderId = selectedFolderId === "all" ? null : selectedFolderId;
     const count = images.length;
+    const trimmedPrompt = scenePrompt.trim();
+    const sceneText = trimmedPrompt.length > 0 ? trimmedPrompt.slice(0, 500) : undefined;
 
     for (let i = 0; i < images.length; i++) {
       startEnhanceJob({
         image: images[i],
         background,
+        sceneText,
         folderId,
         label: count > 1 ? `Enhancing ${i + 1} of ${count}` : "Enhancing image",
       });
     }
     setSelectedImages([]);
+    setScenePrompt("");
     toast.info(count === 1 ? "Enhancement started — you can keep working" : `Enhancing ${count} images in the background`);
   };
 
@@ -672,8 +677,26 @@ export function AIStudio() {
                 </div>
               )}
 
+              <div className="mt-3">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Describe your scene
+                  <span className="ms-1 font-normal text-slate-500">(or skip and pick a preset below)</span>
+                </label>
+                <textarea
+                  value={scenePrompt}
+                  onChange={(e) => setScenePrompt(e.target.value.slice(0, 500))}
+                  placeholder='e.g. "A luxury abaya on a mannequin in a Riyadh marble lobby"'
+                  rows={2}
+                  className="w-full resize-none rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                />
+                <div className="mt-1 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>{scenePrompt.trim().length > 0 ? "Custom scene — preset below will be ignored." : "No scene typed — preset below will be used."}</span>
+                  <span>{scenePrompt.length}/500</span>
+                </div>
+              </div>
+
               <div className="mt-3 flex gap-2 flex-wrap">
-                <Select value={background} onValueChange={setBackground}>
+                <Select value={background} onValueChange={setBackground} disabled={scenePrompt.trim().length > 0}>
                   <SelectTrigger className="w-[170px] border-teal-200 text-teal-700"><SelectValue placeholder="Background" /></SelectTrigger>
                   <SelectContent>{backgroundOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
                 </Select>

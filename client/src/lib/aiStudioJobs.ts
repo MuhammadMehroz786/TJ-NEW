@@ -100,6 +100,7 @@ function extractError(err: unknown): string {
 export function startEnhanceJob(params: {
   image: string;
   background: string;
+  sceneText?: string;
   folderId: string | null;
   label?: string;
 }): Job {
@@ -116,6 +117,7 @@ export function startEnhanceJob(params: {
     .post("/ai-studio/enhance", {
       image: params.image,
       background: params.background,
+      sceneText: params.sceneText,
       folderId: params.folderId,
     }, { timeout: 180000 })
     .then((res) => {

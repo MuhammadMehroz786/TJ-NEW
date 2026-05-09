@@ -8,7 +8,7 @@ import { authenticate, AuthRequest, requireRole } from "../middleware/auth";
 import { AICreditError, consumeWeeklyAICredit, refundOneCredit } from "../services/aiCredits";
 import { refineProductImage } from "../services/imageRefinement";
 import { signMediaPath, MEDIA_TTL_SHORT } from "../lib/mediaSign";
-import { enhanceWithGemini, backgroundScenes as enhanceBgScenes, EnhanceError } from "../lib/enhanceImage";
+import { enhanceWithGemini, backgroundScenes as enhanceBgScenes, EnhanceError, sanitizeSceneText } from "../lib/enhanceImage";
 import { saveEnhancementToLibrary } from "../lib/imageStorage";
 // Loaded untyped to sidestep the stale @types/express-serve-static-core tree
 // that multer's types pull in. See products.ts for the same pattern.
@@ -259,15 +259,15 @@ router.get("/images", async (req: AuthRequest, res: Response): Promise<void> => 
 // POST /api/ai-studio/enhance
 router.post("/enhance", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { image, background, folderId } = req.body as { image?: string; background?: string; folderId?: string | null };
+    const { image, background, sceneText: rawSceneText, folderId } = req.body as {
+      image?: string;
+      background?: string;
+      sceneText?: string;
+      folderId?: string | null;
+    };
 
     if (!image) {
       res.status(400).json({ error: "Please upload an image first", code: "VALIDATION_ERROR" });
-      return;
-    }
-
-    if (!process.env.GEMINI_API_KEY) {
-      res.status(500).json({ error: "GEMINI_API_KEY is not set", code: "CONFIG_ERROR" });
       return;
     }
 
@@ -283,69 +283,35 @@ router.post("/enhance", async (req: AuthRequest, res: Response): Promise<void> =
       throw err;
     }
 
+    // Resolve scene: free-text wins over preset when present. Sanitize lives
+    // inside enhanceWithGemini → buildPrompt; we only check non-empty here.
+    const sceneText =
+      typeof rawSceneText === "string" && rawSceneText.trim().length > 0
+        ? rawSceneText.trim()
+        : undefined;
+    const sceneName = !sceneText && background && enhanceBgScenes[background] ? background : "studio";
+
     const creditUsage = await consumeWeeklyAICredit(prisma, req.auth!.userId);
 
     try {
-      const sceneName = background && backgroundScenes[background] ? background : "studio";
-      const sceneDescription = backgroundScenes[sceneName];
-      const fixedPrompt = `You are a professional e-commerce product photographer. Edit this product image following these strict rules:
-
-PRODUCT PRESERVATION (most important):
-- Keep the product EXACTLY as it is — same shape, size, proportions, colors, textures, labels, and details.
-- Do NOT alter, regenerate, distort, or artistically reinterpret the product in any way.
-- Maintain the product's original scale and perspective angle.
-
-BACKGROUND REPLACEMENT:
-- Completely remove the existing background.
-- Replace it with: ${sceneDescription}.
-- The new background must look photorealistic and naturally match the product's perspective and viewing angle.
-
-LIGHTING & SHADOWS:
-- Adjust the product's lighting to seamlessly match the new background environment.
-- Add realistic, soft contact shadows beneath the product that match the light direction of the scene.
-- Ensure consistent color temperature between the product and background.
-- Add subtle reflections on glossy surfaces if the background surface would naturally produce them.
-
-IMAGE QUALITY:
-- Output a sharp, high-resolution, professional e-commerce photograph.
-- Enhance clarity and detail on the product without changing its appearance.
-- Use proper white balance and color grading appropriate for the scene.
-
-STRICT RULES:
-- Do NOT add any text, watermarks, logos, or branding.
-- Do NOT add extra objects, props, or decorations that weren't specified in the background.
-- Do NOT crop or change the framing — keep the product centered and properly composed.
-- The result must look like an authentic photograph, not a composite or collage.`;
-
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-image",
-        contents: [{ inlineData: { mimeType: parsedInput.mimeType, data: parsedInput.base64 } }, fixedPrompt],
-        config: { responseModalities: ["image", "text"] },
+      const output = await enhanceWithGemini({
+        inputMime: parsedInput.mimeType,
+        inputBase64: parsedInput.base64,
+        scene: sceneName,
+        sceneText,
       });
 
-      const parts = response.candidates?.[0]?.content?.parts;
-      if (!parts) throw new Error("No response parts returned.");
-
-      const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
-      if (!imagePart?.inlineData?.data) throw new Error("No image data in response.");
-
-      const rawOutputMime = imagePart.inlineData.mimeType || "image/png";
       const extMap: Record<string, string> = {
         "image/png": "png",
         "image/jpeg": "jpg",
         "image/webp": "webp",
       };
-      // Only accept the 3 image mime types we support; ignore anything else Gemini might return
-      const outputMimeType = extMap[rawOutputMime] ? rawOutputMime : "image/png";
-      const outputExt = extMap[outputMimeType] || "png";
-      const outputBase64 = imagePart.inlineData.data as string;
+      const outputExt = extMap[output.mimeType] || "png";
 
       const randomId = crypto.randomUUID();
       const relativePath = path.join("ai-studio", req.auth!.userId, `${Date.now()}-${randomId}.${outputExt}`);
       const normalizedPath = relativePath.replaceAll("\\", "/");
-      await saveBase64ToStorage(outputBase64, normalizedPath);
+      await saveBase64ToStorage(output.base64, normalizedPath);
 
       const imageUrl = `/media/${normalizedPath}`;
       let selectedFolderId: string | null = null;
@@ -357,13 +323,20 @@ STRICT RULES:
         if (folder) selectedFolderId = folder.id;
       }
 
+      // Storage label: when the user typed their own scene, save the trimmed
+      // text under "custom: ..." so it shows on the gallery tile and survives
+      // refines. Matches the products route's convention.
+      const storedLabel = sceneText
+        ? `custom: ${sanitizeSceneText(sceneText).slice(0, 80)}`
+        : sceneName;
+
       const record = await prisma.aiStudioImage.create({
         data: {
           userId: req.auth!.userId,
           folderId: selectedFolderId,
           imagePath: normalizedPath,
           imageUrl,
-          background: sceneName,
+          background: storedLabel,
         },
         include: {
           folder: { select: { id: true, name: true } },
@@ -384,6 +357,10 @@ STRICT RULES:
     }
   } catch (err: any) {
     if (err instanceof AICreditError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
+    if (err instanceof EnhanceError) {
       res.status(err.status).json({ error: err.message, code: err.code });
       return;
     }

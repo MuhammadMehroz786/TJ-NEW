@@ -885,6 +885,10 @@ export function Products() {
   const handlePush = async (productIds: string[], connectionId: string) => {
     setPushing(true);
     try {
+      // Marketplace push is sequential server-side and each Shopify/Salla call
+      // can take a couple of seconds, so axios' 15s default times out long
+      // before a multi-product push completes. 10 min covers the realistic
+      // batch size (max 50 products).
       const res = await api.post(
         "/products/push",
         { productIds, connectionId },
@@ -895,6 +899,10 @@ export function Products() {
       fetchProducts();
     } catch (err: unknown) {
       const e = err as { code?: string; response?: { status?: number; data?: { error?: string } } };
+      // Distinguish a real server error from a network/timeout. If we got an
+      // HTTP response, trust the server's error message. If not, the request
+      // never completed — the server may have succeeded anyway, so suggest a
+      // refresh rather than reporting a hard failure.
       if (e?.response?.data?.error) {
         toast.error(e.response.data.error);
       } else if (e?.code === "ECONNABORTED" || !e?.response) {
@@ -2504,8 +2512,25 @@ export function Products() {
               </div>
             </div>
 
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="bulk-scene-text" className="text-slate-700">
+                  Describe your scene <span className="text-slate-400 font-normal">(or skip and pick a preset below)</span>
+                </Label>
+                <span className="text-[11px] text-slate-400">{bulkEnhanceSceneText.length}/300</span>
+              </div>
+              <textarea
+                id="bulk-scene-text"
+                value={bulkEnhanceSceneText}
+                onChange={(e) => setBulkEnhanceSceneText(e.target.value.slice(0, 300))}
+                placeholder='e.g. "A luxury abaya on a mannequin in a Riyadh marble lobby"'
+                rows={2}
+                className="flex w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-1 resize-none"
+              />
+            </div>
+
             <div className="space-y-2">
-              <Label>Background</Label>
+              <Label>Or pick a preset</Label>
               <Select value={bulkEnhanceScene} onValueChange={setBulkEnhanceScene} disabled={!!bulkEnhanceSceneText.trim()}>
                 <SelectTrigger>
                   <SelectValue />
@@ -2518,25 +2543,10 @@ export function Products() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="bulk-scene-text" className="text-slate-700">Custom theme <span className="text-slate-400 font-normal">(optional)</span></Label>
-                <span className="text-[11px] text-slate-400">{bulkEnhanceSceneText.length}/300</span>
-              </div>
-              <textarea
-                id="bulk-scene-text"
-                value={bulkEnhanceSceneText}
-                onChange={(e) => setBulkEnhanceSceneText(e.target.value.slice(0, 300))}
-                placeholder="e.g. soft pastel pink background with warm morning light"
-                rows={2}
-                className="flex w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-1 resize-none"
-              />
               <p className="text-[11px] text-slate-500">
                 {bulkEnhanceSceneText.trim()
-                  ? "Using your custom theme — the background preset above is ignored."
-                  : "Leave empty to use the background preset above."}
+                  ? "Custom scene above will be used — preset is ignored."
+                  : "No scene typed — this preset will be used."}
               </p>
             </div>
 
@@ -2669,8 +2679,25 @@ export function Products() {
                 </div>
               </div>
 
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="single-scene-text" className="text-slate-700">
+                    Describe your scene <span className="text-slate-400 font-normal">(or skip and pick a preset below)</span>
+                  </Label>
+                  <span className="text-[11px] text-slate-400">{enhanceProductSceneText.length}/300</span>
+                </div>
+                <textarea
+                  id="single-scene-text"
+                  value={enhanceProductSceneText}
+                  onChange={(e) => setEnhanceProductSceneText(e.target.value.slice(0, 300))}
+                  placeholder='e.g. "A luxury abaya on a mannequin in a Riyadh marble lobby"'
+                  rows={2}
+                  className="flex w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-1 resize-none"
+                />
+              </div>
+
               <div className="space-y-2">
-                <Label>Background</Label>
+                <Label>Or pick a preset</Label>
                 <Select value={enhanceProductScene} onValueChange={setEnhanceProductScene} disabled={!!enhanceProductSceneText.trim()}>
                   <SelectTrigger>
                     <SelectValue />
@@ -2683,25 +2710,10 @@ export function Products() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="single-scene-text" className="text-slate-700">Custom theme <span className="text-slate-400 font-normal">(optional)</span></Label>
-                  <span className="text-[11px] text-slate-400">{enhanceProductSceneText.length}/300</span>
-                </div>
-                <textarea
-                  id="single-scene-text"
-                  value={enhanceProductSceneText}
-                  onChange={(e) => setEnhanceProductSceneText(e.target.value.slice(0, 300))}
-                  placeholder="e.g. marble countertop with warm morning sunlight"
-                  rows={2}
-                  className="flex w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-1 resize-none"
-                />
                 <p className="text-[11px] text-slate-500">
                   {enhanceProductSceneText.trim()
-                    ? "Using your custom theme — the background preset above is ignored."
-                    : "Leave empty to use the background preset above."}
+                    ? "Custom scene above will be used — preset is ignored."
+                    : "No scene typed — this preset will be used."}
                 </p>
               </div>
 
