@@ -323,6 +323,36 @@ model WhatsAppMessage {
   @@index([sessionId, createdAt])
 }
 
+// Email autoresponder bot. Each row is one inbound email the IMAP poller
+// picked up: the headers + body, the classified action (auto-reply / skipped /
+// error), the language we detected, the would-be reply body Gemini drafted,
+// and (when send is enabled in phase 2) the timestamp + IMAP UID we sent.
+//
+// imapUid is unique-per-mailbox so the poller won't re-process the same
+// message after a restart.
+model SupportEmail {
+  id              String    @id @default(uuid())
+  imapUid         Int       @unique
+  messageId       String?
+  threadId        String?
+  fromAddress     String
+  fromName        String?
+  toAddress       String
+  subject         String?   @db.Text
+  bodyText        String?   @db.Text
+  receivedAt      DateTime
+  language        String?
+  classifiedAction String
+  skippedReason   String?
+  generatedReply  String?   @db.Text
+  sentAt          DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([receivedAt])
+  @@index([fromAddress])
+  @@index([classifiedAction])
+}
+
 // Tracks every enhancement the bot sent to a merchant, keyed by the outbound
 // WhatsApp message ID. When the user replies (quotes) that image, we look up
 // the original source to refine against.

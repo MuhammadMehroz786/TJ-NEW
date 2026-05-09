@@ -157,4 +157,7 @@ async function bootstrapAdmins() {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   bootstrapAdmins();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const { startEmailBot } = require("./services/emailBot") as typeof import("./services/emailBot");
+  startEmailBot();
 });

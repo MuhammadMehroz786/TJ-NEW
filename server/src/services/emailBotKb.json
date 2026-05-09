@@ -1,0 +1,4 @@
+{
+  "_comment_for_humans": "Knowledge base entries the email bot uses as context when drafting replies. Each entry is one Q&A pair. Until this file has real entries, every drafted reply will be a generic 'thanks, a human will follow up' template. Add 15-25 entries to make the bot useful. Schema: q (the canonical question), a_en (English answer), a_ar (Arabic answer), videoUrl (optional URL to a tutorial video).",
+  "entries": []
+}

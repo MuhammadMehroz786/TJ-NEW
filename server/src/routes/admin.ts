@@ -691,6 +691,70 @@ router.get("/whatsapp-leads", async (req: AuthRequest, res: Response): Promise<v
   }
 });
 
+// ── GET /api/admin/support-emails — paginated list of inbound support emails ──
+router.get("/support-emails", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
+    const pageSize = Math.min(100, Math.max(1, parseInt((req.query.pageSize as string) || "50", 10)));
+    const search = String(req.query.search || "").trim();
+    const action = String(req.query.action || "").trim();
+
+    const where: Prisma.SupportEmailWhereInput = {};
+    if (search) {
+      where.OR = [
+        { fromAddress: { contains: search, mode: "insensitive" } },
+        { fromName: { contains: search, mode: "insensitive" } },
+        { subject: { contains: search, mode: "insensitive" } },
+      ];
+    }
+    if (action === "auto_reply" || action === "skipped") {
+      where.classifiedAction = action;
+    }
+
+    const [data, total] = await Promise.all([
+      prisma.supportEmail.findMany({
+        where,
+        orderBy: { receivedAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          fromAddress: true,
+          fromName: true,
+          subject: true,
+          language: true,
+          classifiedAction: true,
+          skippedReason: true,
+          receivedAt: true,
+          sentAt: true,
+        },
+      }),
+      prisma.supportEmail.count({ where }),
+    ]);
+
+    res.json({ data, total, page, pageSize });
+  } catch (err) {
+    console.error("[admin] support-emails list error:", err);
+    res.status(500).json({ error: "Failed to load support emails", code: "INTERNAL_ERROR" });
+  }
+});
+
+// ── GET /api/admin/support-emails/:id — full email + drafted reply ────────────
+router.get("/support-emails/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const row = await prisma.supportEmail.findUnique({ where: { id } });
+    if (!row) {
+      res.status(404).json({ error: "Email not found", code: "NOT_FOUND" });
+      return;
+    }
+    res.json({ data: row });
+  } catch (err) {
+    console.error("[admin] support-email detail error:", err);
+    res.status(500).json({ error: "Failed to load email", code: "INTERNAL_ERROR" });
+  }
+});
+
 // ── GET /api/admin/whatsapp-leads/:id — full session + message log ────────────
 router.get("/whatsapp-leads/:id", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
