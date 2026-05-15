@@ -32,6 +32,8 @@ import whatsappRoutes from "./routes/whatsapp";
 import creditsRoutes from "./routes/credits";
 import sallaRoutes from "./routes/salla";
 import adminRoutes from "./routes/admin";
+import { createContentAgentRouter } from "./routes/contentAgent";
+import { GeminiContentClient } from "./lib/contentAgent/geminiClient";
 import { PrismaClient } from "@prisma/client";
 
 const app = express();
@@ -128,6 +130,17 @@ app.use("/api/credits/checkout", checkoutLimiter);
 app.use("/api/credits", creditsRoutes);
 app.use("/api/salla", sallaRoutes);
 app.use("/api/admin", adminRoutes);
+
+// Content Agent — admin-only short-form content drafter. aiLimiter caps
+// Gemini calls per-IP just like /api/ai-studio. Singletons live here so the
+// same Prisma + Gemini clients are reused across requests.
+const contentAgentPrisma = new PrismaClient();
+const contentAgentGemini = new GeminiContentClient();
+app.use(
+  "/api/admin/content-agent",
+  aiLimiter,
+  createContentAgentRouter({ prisma: contentAgentPrisma, gemini: contentAgentGemini }),
+);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
