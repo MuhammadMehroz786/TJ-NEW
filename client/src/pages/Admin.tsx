@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid, Legend } from "recharts";
+import { ContentAgentTab } from "@/components/admin/content-agent/ContentAgentTab";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -195,7 +196,7 @@ function Tabs({ tabs, active, onChange }: { tabs: { id: string; label: string; i
 // Main component
 // ──────────────────────────────────────────────────────────────────────────────
 export function Admin() {
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "revenue" | "activity" | "whatsapp" | "leads" | "emails" | "codes" | "system">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "users" | "revenue" | "activity" | "whatsapp" | "leads" | "emails" | "codes" | "content-agent" | "system">("overview");
 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [active, setActive] = useState<ActiveUsers | null>(null);
@@ -470,6 +471,7 @@ export function Admin() {
           { id: "leads", label: "Leads", icon: Inbox },
           { id: "emails", label: "Support Emails", icon: Mail },
           { id: "codes", label: "AI Codes", icon: Ticket },
+          { id: "content-agent", label: "Content Agent", icon: Sparkles },
           { id: "system", label: "System", icon: Server },
         ]}
       />
@@ -1084,6 +1086,10 @@ export function Admin() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {activeTab === "content-agent" && (
+        <ContentAgentTab />
       )}
 
       {activeTab === "system" && sys && (

@@ -54,11 +54,11 @@ enum CreditPurchaseStatus {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      UserRole @default(MERCHANT)
+  id               String   @id @default(uuid())
+  email            String   @unique
+  password         String
+  name             String
+  role             UserRole @default(MERCHANT)
   aiCredits        Int      @default(30)
   aiCreditsWeekKey String   @default("")
   purchasedCredits Int      @default(0)
@@ -66,21 +66,22 @@ model User {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  marketplaceConnections MarketplaceConnection[]
-  products               Product[]
-  creatorProfile         CreatorProfile?
-  merchantCampaigns      Campaign[]              @relation("MerchantCampaigns")
-  creatorCampaigns       Campaign[]              @relation("CreatorCampaigns")
-  promoCodes             PromoCode[]
-  affiliateLinks         AffiliateLink[]
-  merchantSales          ManualSale[]            @relation("MerchantSales")
-  creatorSales           ManualSale[]            @relation("CreatorSales")
-  aiStudioImages         AiStudioImage[]
-  aiStudioFolders        AiStudioFolder[]
-  whatsappSessions       WhatsAppSession[]
-  creditPurchases        CreditPurchase[]
-  passwordResetTokens    PasswordResetToken[]
+  marketplaceConnections  MarketplaceConnection[]
+  products                Product[]
+  creatorProfile          CreatorProfile?
+  merchantCampaigns       Campaign[]               @relation("MerchantCampaigns")
+  creatorCampaigns        Campaign[]               @relation("CreatorCampaigns")
+  promoCodes              PromoCode[]
+  affiliateLinks          AffiliateLink[]
+  merchantSales           ManualSale[]             @relation("MerchantSales")
+  creatorSales            ManualSale[]             @relation("CreatorSales")
+  aiStudioImages          AiStudioImage[]
+  aiStudioFolders         AiStudioFolder[]
+  whatsappSessions        WhatsAppSession[]
+  creditPurchases         CreditPurchase[]
+  passwordResetTokens     PasswordResetToken[]
   aiCreditCodeRedemptions AiCreditCodeRedemption[]
+  contentDrafts           ContentDraft[]
 }
 
 model CreatorProfile {
@@ -113,9 +114,9 @@ model Campaign {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  merchant User    @relation("MerchantCampaigns", fields: [merchantId], references: [id], onDelete: Cascade)
-  creator  User    @relation("CreatorCampaigns", fields: [creatorId], references: [id], onDelete: Cascade)
-  product  Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  merchant User     @relation("MerchantCampaigns", fields: [merchantId], references: [id], onDelete: Cascade)
+  creator  User     @relation("CreatorCampaigns", fields: [creatorId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   payment  Payment?
 }
 
@@ -154,8 +155,8 @@ model AffiliateLink {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  creator User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  product Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  creator User    @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   clicks  Click[]
 
   @@unique([creatorId, productId])
@@ -183,8 +184,8 @@ model ManualSale {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  merchant User    @relation("MerchantSales", fields: [merchantId], references: [id], onDelete: Cascade)
-  creator  User    @relation("CreatorSales", fields: [creatorId], references: [id], onDelete: Cascade)
+  merchant User     @relation("MerchantSales", fields: [merchantId], references: [id], onDelete: Cascade)
+  creator  User     @relation("CreatorSales", fields: [creatorId], references: [id], onDelete: Cascade)
   product  Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 }
 
@@ -244,16 +245,16 @@ model Product {
 }
 
 model AiStudioImage {
-  id        String   @id @default(uuid())
-  userId    String
-  folderId  String?
-  imagePath String
-  imageUrl  String
-  background String  @default("studio")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  userId     String
+  folderId   String?
+  imagePath  String
+  imageUrl   String
+  background String   @default("studio")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   folder AiStudioFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
@@ -299,7 +300,7 @@ model WhatsAppSession {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user         User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
   enhancements WhatsAppEnhancement[]
   messages     WhatsAppMessage[]
 
@@ -331,22 +332,22 @@ model WhatsAppMessage {
 // imapUid is unique-per-mailbox so the poller won't re-process the same
 // message after a restart.
 model SupportEmail {
-  id              String    @id @default(uuid())
-  imapUid         Int       @unique
-  messageId       String?
-  threadId        String?
-  fromAddress     String
-  fromName        String?
-  toAddress       String
-  subject         String?   @db.Text
-  bodyText        String?   @db.Text
-  receivedAt      DateTime
-  language        String?
+  id               String    @id @default(uuid())
+  imapUid          Int       @unique
+  messageId        String?
+  threadId         String?
+  fromAddress      String
+  fromName         String?
+  toAddress        String
+  subject          String?   @db.Text
+  bodyText         String?   @db.Text
+  receivedAt       DateTime
+  language         String?
   classifiedAction String
-  skippedReason   String?
-  generatedReply  String?   @db.Text
-  sentAt          DateTime?
-  createdAt       DateTime  @default(now())
+  skippedReason    String?
+  generatedReply   String?   @db.Text
+  sentAt           DateTime?
+  createdAt        DateTime  @default(now())
 
   @@index([receivedAt])
   @@index([fromAddress])
@@ -357,12 +358,12 @@ model SupportEmail {
 // WhatsApp message ID. When the user replies (quotes) that image, we look up
 // the original source to refine against.
 model WhatsAppEnhancement {
-  id              String   @id @default(uuid())
-  sessionId       String
-  outboundWamid   String   @unique
-  sourceImage     String   @db.Text
-  sourceMimeType  String
-  createdAt       DateTime @default(now())
+  id             String   @id @default(uuid())
+  sessionId      String
+  outboundWamid  String   @unique
+  sourceImage    String   @db.Text
+  sourceMimeType String
+  createdAt      DateTime @default(now())
 
   session WhatsAppSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -374,16 +375,16 @@ model WhatsAppEnhancement {
 // deleted (User row created elsewhere); expired/abandoned ones are cleaned up
 // by TTL or on next signup attempt for the same email.
 model PendingSignup {
-  id                String   @id @default(uuid())
-  email             String   @unique
-  passwordHash      String
-  name              String
-  role              UserRole @default(MERCHANT)
-  otpHash           String
-  otpExpiresAt      DateTime
-  attempts          Int      @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(MERCHANT)
+  otpHash      String
+  otpExpiresAt DateTime
+  attempts     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([email])
   @@index([otpExpiresAt])
@@ -393,12 +394,12 @@ model PendingSignup {
 // invalidated by setting usedAt on request). Token itself is never stored —
 // only a sha256 hash, compared in constant time.
 model PasswordResetToken {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  tokenHash String   @unique
+  tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -409,14 +410,14 @@ model PasswordResetToken {
 // Short-lived login codes for admin passwordless authentication.
 // One row per email at a time (upserted). Deleted on successful verify.
 model AdminLoginCode {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  codeHash     String
-  expiresAt    DateTime
-  attempts     Int      @default(0)
-  requestedIp  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String   @id @default(uuid())
+  email       String   @unique
+  codeHash    String
+  expiresAt   DateTime
+  attempts    Int      @default(0)
+  requestedIp String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([expiresAt])
 }
@@ -439,18 +440,18 @@ model CreditPurchase {
 // Admin-issued promo codes that grant AI credits when redeemed by a merchant.
 // Distinct from `PromoCode` (which is merchant-issued storefront discounts).
 model AiCreditCode {
-  id              String   @id @default(uuid())
-  code            String   @unique
-  credits         Int
+  id             String    @id @default(uuid())
+  code           String    @unique
+  credits        Int
   // null = unlimited redemptions; otherwise total cap across all users
-  maxRedemptions  Int?
+  maxRedemptions Int?
   // null = never expires
-  expiresAt       DateTime?
-  isActive        Boolean  @default(true)
-  note            String?
-  createdBy       String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  expiresAt      DateTime?
+  isActive       Boolean   @default(true)
+  note           String?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   redemptions AiCreditCodeRedemption[]
 
@@ -470,4 +471,43 @@ model AiCreditCodeRedemption {
   // One redemption per user per code
   @@unique([codeId, userId])
   @@index([userId, createdAt])
+}
+
+// Short-Form Content Agent — admin-only, internal team tool. One row per
+// generation; failed attempts are persisted with status="failed" + failureReason
+// so the team can inspect what Gemini returned. Versioning via parentId
+// self-relation handles regenerations without a separate versions table.
+model ContentDraft {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now())
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  // Input snapshot (frozen so re-runs are reproducible)
+  topic     String   @db.Text
+  tone      String
+  goal      String
+  language  String
+  platforms String[]
+
+  // Output
+  hooks      Json
+  script     String @db.Text
+  storyboard Json
+  captions   Json
+
+  // Audit
+  model         String  @default("gemini-2.5-flash")
+  tokensUsed    Int?
+  latencyMs     Int?
+  status        String  @default("ok")
+  failureReason String? @db.Text
+
+  // Versioning
+  parentId String?
+  parent   ContentDraft?  @relation("ContentDraftVersions", fields: [parentId], references: [id])
+  versions ContentDraft[] @relation("ContentDraftVersions")
+
+  @@index([createdAt])
+  @@index([createdById])
 }
