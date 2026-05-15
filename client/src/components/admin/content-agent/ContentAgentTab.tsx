@@ -6,9 +6,13 @@ import { ResultPanel } from "./ResultPanel";
 import { HistoryList } from "./HistoryList";
 import type { ContentDraft, GenerateInput } from "@/types/contentAgent";
 
-// Pulls the input snapshot out of a draft so the form can be prefilled either
-// for Duplicate (no parentId) or Regenerate (parentId set).
-function inputFromDraft(draft: ContentDraft): Partial<GenerateInput> {
+// Pulls the input snapshot out of a draft so the form can be prefilled
+// either for Duplicate (no parentId) or Regenerate (parentId set). Returns
+// a fully-formed input (every GenerateInput field except the optional
+// parentId), so callers don't need an `as GenerateInput` widening cast.
+type DraftInput = Omit<GenerateInput, "parentId">;
+
+function inputFromDraft(draft: ContentDraft): DraftInput {
   return {
     topic: draft.topic,
     tone: draft.tone,
@@ -20,7 +24,7 @@ function inputFromDraft(draft: ContentDraft): Partial<GenerateInput> {
 
 export function ContentAgentTab() {
   const [current, setCurrent] = useState<ContentDraft | null>(null);
-  const [formSeed, setFormSeed] = useState<Partial<GenerateInput> | undefined>();
+  const [formSeed, setFormSeed] = useState<DraftInput | undefined>();
   const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -57,7 +61,7 @@ export function ContentAgentTab() {
             busy={busy}
             onRegenerate={() => {
               if (!current) return;
-              void submit(inputFromDraft(current) as GenerateInput, current.id);
+              void submit(inputFromDraft(current), current.id);
             }}
           />
         </div>
