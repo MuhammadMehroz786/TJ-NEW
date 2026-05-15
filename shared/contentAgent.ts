@@ -47,11 +47,21 @@ export const PlatformCaptionSchema = z.object({
   caption: z.string().min(1),
   hashtags: z.array(z.string().min(1)).min(0).max(20),
 });
+// Captions: optional per platform. The cross-check in
+// validateOutputAgainstInput() enforces that every requested platform IS
+// present; this schema accepts any subset so Gemini omitting one platform
+// surfaces as a clear cross-check failure (with platform name), not a
+// generic zod "required" complaint.
+const CaptionsSchema = z.object({
+  tiktok: PlatformCaptionSchema.optional(),
+  reels: PlatformCaptionSchema.optional(),
+  shorts: PlatformCaptionSchema.optional(),
+});
 export const GenerationOutputSchema = z.object({
   hooks: z.array(z.string().min(1)).min(1).max(3),
   script: z.string().min(1),
   storyboard: z.array(StoryboardSceneSchema).min(1).max(12),
-  captions: z.record(z.enum(PLATFORMS), PlatformCaptionSchema),
+  captions: CaptionsSchema,
 });
 export type GenerationOutput = z.infer<typeof GenerationOutputSchema>;
 
