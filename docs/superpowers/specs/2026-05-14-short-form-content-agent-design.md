@@ -33,8 +33,8 @@ This spec covers **only the first slice**: a manual short-form drafter the inter
 ## 4. Users & Access
 
 - **Audience:** TijarFlow internal team only.
-- **Access path:** existing admin auth (`requireAuth` + admin check, same middleware used by `routes/admin.ts`).
-- **UI surface:** new "Content Agent" tab in the Admin Dashboard sidebar.
+- **Access path:** existing admin auth — `authenticate` + `requireRole("ADMIN")` from `server/src/middleware/auth.ts`, same pair used at the top of `routes/admin.ts`.
+- **UI surface:** new "Content Agent" tab inside the existing `pages/Admin.tsx` tabbed page (not a separate route — matches the established Admin page pattern alongside Leads, Promo Codes, etc.).
 - **No tenant scoping:** single-org tool; rows are scoped to the admin who created them via `createdById`.
 
 ## 5. Architecture
@@ -69,7 +69,7 @@ One new Prisma model. Migration adds the table and indexes only.
 
 ```prisma
 model ContentDraft {
-  id          String   @id @default(cuid())
+  id          String   @id @default(uuid())
   createdAt   DateTime @default(now())
   createdById String
   createdBy   User     @relation(fields: [createdById], references: [id])
@@ -96,8 +96,8 @@ model ContentDraft {
 
   // Versioning (regeneration)
   parentId    String?
-  parent      ContentDraft?  @relation("Versions", fields: [parentId], references: [id])
-  versions    ContentDraft[] @relation("Versions")
+  parent      ContentDraft?  @relation("ContentDraftVersions", fields: [parentId], references: [id])
+  versions    ContentDraft[] @relation("ContentDraftVersions")
 
   @@index([createdAt])
   @@index([createdById])
@@ -220,8 +220,8 @@ One new page, two-pane layout, plus a history list below.
 ### File layout
 
 ```
-client/src/pages/admin/ContentAgentPage.tsx
-client/src/components/content-agent/
+client/src/components/admin/content-agent/
+  ContentAgentTab.tsx       // top-level tab body — page shell, holds form/result/history state
   GenerateForm.tsx
   ResultPanel.tsx
   HookList.tsx
@@ -229,21 +229,22 @@ client/src/components/content-agent/
   StoryboardTable.tsx
   CaptionTabs.tsx
   HistoryList.tsx
-client/src/hooks/
-  useGenerateContent.ts          // TanStack useMutation
-  useContentHistory.ts           // TanStack useInfiniteQuery
-client/src/types/contentAgent.ts // re-exports from shared/
+client/src/types/contentAgent.ts  // re-exports from shared/contentAgent.ts
 ```
+
+`ContentAgentTab.tsx` is mounted as a new tab inside `pages/Admin.tsx` alongside existing tabs (Overview, Users, Leads, Promo Codes, Email Bot). No new route, no new top-level page.
 
 ### Interaction rules
 
-- Form state local; validated with the shared Zod schema on submit. Submit disabled until valid.
+- Form state local React `useState`; validated with the shared Zod schema on submit. Submit disabled until valid.
+- Data fetching uses the existing `lib/api.ts` axios instance — no TanStack Query (TJ-NEW doesn't use it; staying consistent).
+- History list state: plain `useState` + a `loadMore` callback hitting the cursor endpoint.
 - During generation: button shows spinner + "Drafting…"; form locked.
-- On success: `useMutation` invalidates the history query and sets `latestDraftId` in page state. Result panel reads from the history cache — no second fetch.
-- "Open" on a history row sets `latestDraftId`.
+- On success: `setDrafts((prev) => [newDraft, ...prev])` and `setSelectedId(newDraft.id)`. Result panel reads `drafts.find(d => d.id === selectedId)` from local state.
+- "Open" on a history row sets `selectedId`.
 - "Duplicate" prefills the form with the row's input; no auto-submit.
-- "Regenerate" submits current input with `parentId = latestDraftId`.
-- Copy buttons use `navigator.clipboard.writeText` + existing toast.
+- "Regenerate" submits current form input with `parentId = selectedId`.
+- Copy buttons use `navigator.clipboard.writeText` + `toast` from `sonner` (already imported across the codebase).
 - Result panel sets `dir="rtl"` automatically when the draft's `language === "ar"`, independent of UI language.
 
 ## 12. Security
@@ -263,21 +264,21 @@ client/src/types/contentAgent.ts // re-exports from shared/
 
 ## 14. Testing
 
-- **Server unit tests** (existing Jest setup):
-  - Prompt builder produces expected strings for AR and EN, each tone/goal, each platform combination.
-  - Zod schema accepts valid inputs and rejects each of: short topic, unknown tone, empty platforms, duplicate platforms, missing language.
-  - Output validator accepts a known-good Gemini response, rejects: missing hooks, malformed storyboard scene, missing platform-keyed caption when the platform was requested.
-- **Route integration tests**:
-  - Non-admin → 403.
-  - Valid generate with a mocked Gemini client returns the persisted row.
-  - Mocked Gemini failure persists a `failed` row and returns 502.
-  - History pagination returns a stable cursor and excludes `failed` rows by default.
-- **Client tests**:
-  - Form submit disabled until Zod parse succeeds.
-  - Mutation success appends to history list at top and selects the new row.
-  - Copy button writes the expected string.
+TJ-NEW does not currently have a test runner. This feature introduces **Vitest** to the server workspace (zero-config TS support, fast, ESM-friendly). Tests live next to source as `*.test.ts`.
 
-No live Gemini calls in CI — the Gemini client is injected and mocked.
+- **Server unit tests** (`server/src/services/contentAgent.test.ts`, `server/src/lib/contentAgent/prompt.test.ts`):
+  - Prompt builder produces expected strings for AR and EN, each tone/goal, each platform combination.
+  - Zod input schema accepts valid inputs and rejects each of: short topic, unknown tone, empty platforms, duplicate platforms, missing language.
+  - Output validator accepts a known-good Gemini response, rejects: missing hooks, malformed storyboard scene, missing platform-keyed caption when the platform was requested.
+- **Route integration tests** (`server/src/routes/contentAgent.test.ts`, using a supertest-style approach against the Express app with the Gemini client stubbed via dependency injection):
+  - Non-admin → 403.
+  - Valid generate with a stubbed Gemini client returns the persisted row.
+  - Stubbed Gemini failure persists a `failed` row and returns 502.
+  - History pagination returns a stable cursor and excludes `failed` rows by default.
+
+Client tests are not added in v1 — the client surface is small, all logic lives behind Zod (shared with server tests), and the existing client has no test setup. Manual smoke covers the UI per Section 17.
+
+No live Gemini calls in tests — the Gemini client is injected as a constructor parameter so test code can pass a stub.
 
 ## 15. Codex QA Bar
 
