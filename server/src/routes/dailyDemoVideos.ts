@@ -88,7 +88,7 @@ router.get("/:id", async (req: AuthRequest, res: Response): Promise<void> => {
 
 // ── POST /generate — fire a new generation ───────────────────────────────────
 router.post("/generate", async (req: AuthRequest, res: Response): Promise<void> => {
-  const body = (req.body ?? {}) as { niche?: string; forDate?: string };
+  const body = (req.body ?? {}) as { niche?: string; forDate?: string; productOverride?: string };
 
   let niche: Niche | undefined;
   if (body.niche) {
@@ -97,6 +97,19 @@ router.post("/generate", async (req: AuthRequest, res: Response): Promise<void> 
       return;
     }
     niche = body.niche as Niche;
+  }
+
+  // productOverride is required — admin must describe the specific product
+  // they want featured (e.g. "21-karat gold bracelet with filigree work").
+  // Caps at 200 chars to keep prompts focused and prevent runaway costs.
+  const productOverride = typeof body.productOverride === "string" ? body.productOverride.trim() : "";
+  if (!productOverride) {
+    res.status(400).json({ error: "productOverride is required", code: "PRODUCT_REQUIRED" });
+    return;
+  }
+  if (productOverride.length > 200) {
+    res.status(400).json({ error: "productOverride too long (max 200 chars)", code: "PRODUCT_TOO_LONG" });
+    return;
   }
 
   let forDate: Date | undefined;
@@ -116,7 +129,7 @@ router.post("/generate", async (req: AuthRequest, res: Response): Promise<void> 
   // immediately for client-side polling. The actual pipeline runs in a
   // background task — we don't await it here.
   const triggeredBy = `manual:${req.auth!.userId}`;
-  void runDailyDemoVideo(prisma, { forDate, niche, triggeredBy }).catch((err) => {
+  void runDailyDemoVideo(prisma, { forDate, niche, productOverride, triggeredBy }).catch((err) => {
     // The orchestrator catches its own errors and writes them to the row, so
     // this catch is just defense-in-depth for unexpected throws (e.g. DB down
     // before the first status update).

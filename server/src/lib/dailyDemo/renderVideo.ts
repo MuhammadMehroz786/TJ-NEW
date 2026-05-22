@@ -29,7 +29,8 @@ const VIDEO_W = 1080;
 const VIDEO_H = 1920;
 const FPS = 25;
 const SCENE_DURATION_SEC = 5;        // 3 scenes × 5s = 15s body
-const END_CARD_DURATION_SEC = 3;     // total = 18s, well within "10-15s + CTA"
+const END_CARD_MIN_SEC = 3;          // minimum CTA hold time
+const END_CARD_TAIL_PAD_SEC = 0.8;   // small silence buffer after voiceover ends
 const CROSSFADE_SEC = 0.5;
 const TIJARFLOW_BRAND = "tijarflow.com";
 
@@ -73,6 +74,31 @@ function escapeDrawtext(text: string): string {
   // ffmpeg drawtext escape rules: backslash for ': % \, then single-quote
   // wrapping handles the rest. Arabic content survives without further escaping.
   return text.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/%/g, "\\%").replace(/'/g, "’");
+}
+
+// Probe a media file's duration in seconds using ffprobe. Used to size the
+// end-card hold so the video extends to cover the voiceover instead of getting
+// cut mid-sentence by ffmpeg's -shortest behavior.
+function probeDuration(absPath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      absPath,
+    ]);
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (c) => { stdout += c.toString(); });
+    proc.stderr.on("data", (c) => { stderr += c.toString(); });
+    proc.on("error", (err) => reject(new RenderError(`ffprobe spawn failed: ${err.message}`)));
+    proc.on("close", (code) => {
+      if (code !== 0) return reject(new RenderError(`ffprobe exit ${code}: ${stderr.slice(0, 300)}`));
+      const n = parseFloat(stdout.trim());
+      if (!Number.isFinite(n)) return reject(new RenderError(`ffprobe non-numeric duration: ${stdout}`));
+      resolve(n);
+    });
+  });
 }
 
 function runFfmpeg(args: string[]): Promise<void> {
@@ -140,10 +166,13 @@ async function renderScene(scene: SceneInput, outPath: string): Promise<void> {
 
 // ── CTA end card ─────────────────────────────────────────────────────────────
 
-async function renderEndCard(captionAr: string, outPath: string): Promise<void> {
+async function renderEndCard(captionAr: string, outPath: string, durationSec: number): Promise<void> {
   // Solid TijarFlow brand color background. Centered Arabic CTA + brand URL.
   // Color #1a1a1a (near-black) gives a calm, premium feel and matches the dark
   // walnut table tone from the preceding scenes.
+  //
+  // Duration is dynamic — passed in by the orchestrator after probing the
+  // voiceover length so the CTA holds long enough to cover the last words.
   const caption = escapeDrawtext(captionAr);
   const brand = escapeDrawtext(TIJARFLOW_BRAND);
 
@@ -158,7 +187,7 @@ async function renderEndCard(captionAr: string, outPath: string): Promise<void> 
 
   await runFfmpeg([
     "-f", "lavfi",
-    "-i", `color=c=0x1a1a1a:s=${VIDEO_W}x${VIDEO_H}:d=${END_CARD_DURATION_SEC}:r=${FPS}`,
+    "-i", `color=c=0x1a1a1a:s=${VIDEO_W}x${VIDEO_H}:d=${durationSec.toFixed(2)}:r=${FPS}`,
     "-vf", vf,
     "-c:v", "libx264",
     "-pix_fmt", "yuv420p",
@@ -171,23 +200,26 @@ async function renderEndCard(captionAr: string, outPath: string): Promise<void> 
 
 // ── Concatenate scenes with crossfades ───────────────────────────────────────
 
-async function stitchScenes(sceneFiles: string[], outPath: string): Promise<void> {
-  // Build the xfade chain. xfade transitions overlap by CROSSFADE_SEC.
-  // offset for transition N = (N × SCENE_DURATION_SEC) - (N × CROSSFADE_SEC)
+async function stitchScenes(sceneFiles: string[], sceneDurations: number[], outPath: string): Promise<void> {
+  // Build the xfade chain. xfade transitions overlap by CROSSFADE_SEC, so each
+  // transition N is placed at the END of scene N minus the crossfade.
+  if (sceneFiles.length !== sceneDurations.length) {
+    throw new RenderError(`stitchScenes: ${sceneFiles.length} files vs ${sceneDurations.length} durations`);
+  }
   const inputs: string[] = [];
   for (const f of sceneFiles) {
     inputs.push("-i", f);
   }
 
   const labels: string[] = [];
-  let cumulativeOffset = 0;
+  // Cumulative timeline position where the next transition starts.
+  let cursor = 0;
   for (let i = 0; i < sceneFiles.length - 1; i++) {
-    const sceneLen = i === sceneFiles.length - 2 ? END_CARD_DURATION_SEC : SCENE_DURATION_SEC;
-    cumulativeOffset += (i === 0 ? SCENE_DURATION_SEC : sceneLen) - CROSSFADE_SEC;
+    cursor += sceneDurations[i] - CROSSFADE_SEC;
     const left = i === 0 ? "[0:v]" : `[v${i - 1}]`;
     const right = `[${i + 1}:v]`;
     const out = `[v${i}]`;
-    labels.push(`${left}${right}xfade=transition=fade:duration=${CROSSFADE_SEC}:offset=${cumulativeOffset.toFixed(2)}${out}`);
+    labels.push(`${left}${right}xfade=transition=fade:duration=${CROSSFADE_SEC}:offset=${cursor.toFixed(2)}${out}`);
   }
   const filterComplex = labels.join(";");
   const finalLabel = `[v${sceneFiles.length - 2}]`;
@@ -207,15 +239,15 @@ async function stitchScenes(sceneFiles: string[], outPath: string): Promise<void
 // ── Mix voiceover over the stitched video ────────────────────────────────────
 
 async function mixAudio(videoPath: string, voiceoverPath: string, outPath: string): Promise<void> {
+  // Orchestrator sizes the video to fully cover the voiceover (end-card length
+  // is dynamic), so we don't need -shortest here — it would cut the audio if
+  // anything goes long. Letting both streams play out keeps the last words
+  // audible. Re-encoding video is unnecessary; copy stream.
   await runFfmpeg([
     "-i", videoPath,
     "-i", voiceoverPath,
     "-map", "0:v",
     "-map", "1:a",
-    // Pad audio to match video length so the video doesn't get cut short if
-    // voiceover ends before video.
-    "-af", "apad",
-    "-shortest",
     "-c:v", "copy",
     "-c:a", "aac",
     "-b:a", "192k",
@@ -244,7 +276,18 @@ export async function renderDemoVideo(params: RenderParams): Promise<RenderResul
   const outDir = path.join(params.storageRoot, "daily-videos", params.jobId);
   await fs.mkdir(outDir, { recursive: true });
 
-  // 1. Render each scene independently — Ken Burns alternates in/out/in/out so
+  // 1. Measure the voiceover so we can size the end-card to cover it. Without
+  //    this the CTA hold was a fixed 3s and any voiceover overhang got cut by
+  //    -shortest in the audio mux.
+  const voiceoverSec = await probeDuration(params.voiceoverAbsPath);
+  const bodySec = 3 * SCENE_DURATION_SEC - 2 * CROSSFADE_SEC; // 14s with current constants
+  // End card must hold for at least END_CARD_MIN_SEC, AND long enough so the
+  // total video runtime ≥ voiceover + tail buffer. The crossfade INTO the end
+  // card already shaves CROSSFADE_SEC off the body, so we don't double-count.
+  const requiredTotal = voiceoverSec + END_CARD_TAIL_PAD_SEC;
+  const requiredEndCard = Math.max(END_CARD_MIN_SEC, requiredTotal - bodySec + CROSSFADE_SEC);
+
+  // 2. Render each scene independently — Ken Burns alternates in/out/in so
   //    consecutive scenes don't feel monotonous.
   const sceneSpecs: SceneInput[] = [
     { imagePath: params.shopAbsPath, captionAr: params.captions.shop, zoom: "in" },
@@ -262,14 +305,20 @@ export async function renderDemoVideo(params: RenderParams): Promise<RenderResul
     renderScene(sceneSpecs[0], sceneFiles[0]),
     renderScene(sceneSpecs[1], sceneFiles[1]),
     renderScene(sceneSpecs[2], sceneFiles[2]),
-    renderEndCard(params.captions.cta, endCardFile),
+    renderEndCard(params.captions.cta, endCardFile, requiredEndCard),
   ]);
 
-  // 2. Stitch (3 scenes + 1 end card) with crossfades.
+  // 3. Stitch (3 scenes + 1 end card) with crossfades, with per-segment durations.
   const stitchedFile = path.join(outDir, "stitched.mp4");
-  await stitchScenes([...sceneFiles, endCardFile], stitchedFile);
+  const sceneDurations = [
+    SCENE_DURATION_SEC,
+    SCENE_DURATION_SEC,
+    SCENE_DURATION_SEC,
+    requiredEndCard,
+  ];
+  await stitchScenes([...sceneFiles, endCardFile], sceneDurations, stitchedFile);
 
-  // 3. Mix in voiceover.
+  // 4. Mix in voiceover. Body + end card now fully covers the voiceover.
   const finalFile = path.join(outDir, "final.mp4");
   await mixAudio(stitchedFile, params.voiceoverAbsPath, finalFile);
 

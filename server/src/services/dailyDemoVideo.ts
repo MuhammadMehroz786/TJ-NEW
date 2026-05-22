@@ -70,6 +70,10 @@ function buildScript(niche: Niche): ScriptResult {
 export interface RunOptions {
   forDate?: Date;            // KSA date; defaults to today
   niche?: Niche;             // defaults to rotation-for-date
+  productOverride: string;   // required — specific product within the niche
+                             // (e.g. "premium Cambodian oud chips in a wooden box").
+                             // Used by scenes 2+3 so the merchant sees a transformation
+                             // of a SPECIFIC product type, not a generic one.
   triggeredBy?: string;      // "cron" | "manual:<userId>"
 }
 
@@ -83,7 +87,7 @@ export interface RunResult {
 
 export async function runDailyDemoVideo(
   prisma: PrismaClient,
-  opts: RunOptions = {},
+  opts: RunOptions,
 ): Promise<RunResult> {
   const forDate = opts.forDate ?? todayKsaDate();
   const niche = opts.niche ?? nicheForDate(forDate);
@@ -120,10 +124,12 @@ export async function runDailyDemoVideo(
       data: { script: script as unknown as object },
     });
 
-    // 2. Image gen — 3 scenes in parallel
+    // 2. Image gen — shop + before in parallel, then after via image-to-image
+    //    chained off the before image so the product identity stays consistent.
     await prisma.dailyDemoVideo.update({ where: { id: row.id }, data: { status: "imaging" } });
     const imgs = await generateSceneImages({
       niche: NICHES[niche],
+      productOverride: opts.productOverride,
       jobId: row.id,
       storageRoot: STORAGE_ROOT,
     });

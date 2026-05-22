@@ -78,6 +78,7 @@ const TERMINAL = (s: string) => s === "done" || s === "failed";
 export function DailyVideosTab() {
   const [niches, setNiches] = useState<NicheOption[]>([]);
   const [selectedNiche, setSelectedNiche] = useState<string>("");
+  const [productOverride, setProductOverride] = useState<string>("");
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<VideoRow | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -150,13 +151,21 @@ export function DailyVideosTab() {
     };
   }, [activeJobId, loadHistory]);
 
-  async function handleGenerate(nicheOverride?: string) {
+  async function handleGenerate(nicheOverride?: string, productOverrideOverride?: string) {
     const niche = nicheOverride ?? selectedNiche;
+    const product = (productOverrideOverride ?? productOverride).trim();
     if (!niche) return;
+    if (!product) {
+      toast.error("Describe the specific product (e.g. '21k gold bracelet with filigree')");
+      return;
+    }
     setGenerating(true);
     setActiveJob(null);
     try {
-      const res = await api.post<{ job: VideoRow }>("/admin/daily-videos/generate", { niche });
+      const res = await api.post<{ job: VideoRow }>("/admin/daily-videos/generate", {
+        niche,
+        productOverride: product,
+      });
       setActiveJobId(res.data.job.id);
       setActiveJob(res.data.job);
     } catch (err) {
@@ -173,8 +182,8 @@ export function DailyVideosTab() {
       {/* ── Generator panel ───────────────────────────────────────────── */}
       <Card className="border-slate-200">
         <CardContent className="p-5">
-          <div className="flex flex-col md:flex-row md:items-end gap-4">
-            <div className="flex-1">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
               <Label htmlFor="dv-niche">Niche</Label>
               <Select value={selectedNiche} onValueChange={setSelectedNiche}>
                 <SelectTrigger id="dv-niche" className="mt-1">
@@ -189,9 +198,27 @@ export function DailyVideosTab() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="md:col-span-2">
+              <Label htmlFor="dv-product">Specific product</Label>
+              <input
+                id="dv-product"
+                type="text"
+                value={productOverride}
+                onChange={(e) => setProductOverride(e.target.value)}
+                placeholder="e.g. 21-karat gold bracelet with filigree work"
+                maxLength={200}
+                className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Shown in the before / after frames. Be specific — color, material, style.
+                {productOverride && ` · ${productOverride.length}/200`}
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end">
             <Button
               onClick={() => handleGenerate()}
-              disabled={generating || !selectedNiche}
+              disabled={generating || !selectedNiche || !productOverride.trim()}
               className="bg-teal-600 hover:bg-teal-700 text-white"
             >
               {generating ? (
@@ -269,7 +296,18 @@ export function DailyVideosTab() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {history.map((v) => (
-            <VideoCard key={v.id} video={v} onRetry={() => void handleGenerate(v.niche)} />
+            <VideoCard
+              key={v.id}
+              video={v}
+              onRetry={() => {
+                // Retry pre-fills the form with the same niche so the admin can
+                // re-supply a product description and click Generate. We don't
+                // store the original productOverride on the row, so it can't be
+                // replayed automatically.
+                setSelectedNiche(v.niche);
+                toast("Pick a product description and click Generate", { icon: "↻" });
+              }}
+            />
           ))}
         </div>
       </div>
