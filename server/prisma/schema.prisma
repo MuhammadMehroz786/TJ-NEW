@@ -511,3 +511,38 @@ model ContentDraft {
   @@index([createdAt])
   @@index([createdById])
 }
+
+// Daily Demo Video — auto-generated 10-15s before/after slideshow for TijarFlow's
+// own social marketing. One video per day per niche, rotated through the week
+// (gold / perfume / abaya / dates / oud / cosmetics / watches). Cron triggers at
+// 09:00 KSA; admins can also manually trigger from the dashboard. The final MP4
+// is stored under storage/daily-videos/<id>/final.mp4 and served via signed URL.
+model DailyDemoVideo {
+  id          String   @id @default(uuid())
+  createdAt   DateTime @default(now())
+  // KSA calendar date this video represents. Unique with niche so the cron is
+  // idempotent and admins can backfill historical dates.
+  forDate     DateTime @db.Date
+  niche       String   // gold | perfume | abaya | dates | oud | cosmetics | watches
+
+  status        String  @default("pending")  // pending | scripting | imaging | voicing | rendering | done | failed
+  errorMessage  String? @db.Text
+
+  // Frozen output of the Gemini script step — captions, image prompts, voiceover script
+  script        Json?
+  // Relative paths under server/storage/ — sign with mediaSign for delivery
+  imagePaths    String[] @default([])
+  voiceoverPath String?
+  videoPath     String?
+  thumbnailPath String?
+
+  costCents     Int?
+  renderMs      Int?
+  // 'cron' or 'manual:<userId>'
+  triggeredBy   String  @default("cron")
+
+  @@unique([forDate, niche])
+  @@index([createdAt])
+  @@index([status])
+}
+
