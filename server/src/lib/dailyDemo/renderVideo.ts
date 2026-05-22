@@ -32,7 +32,7 @@ const SCENE_DURATION_SEC = 5;        // 3 scenes × 5s = 15s body
 const END_CARD_MIN_SEC = 3;          // minimum CTA hold time
 const END_CARD_TAIL_PAD_SEC = 0.8;   // small silence buffer after voiceover ends
 const CROSSFADE_SEC = 0.5;
-const TIJARFLOW_BRAND = "tijarflow.com";
+const TIJARFLOW_BRAND = "www.tijarflow.com";
 
 export class RenderError extends Error {
   constructor(message: string) {
@@ -131,16 +131,31 @@ async function renderScene(scene: SceneInput, outPath: string): Promise<void> {
 
   // Caption: bottom-positioned, semi-transparent black box behind for readability.
   // text_shaping=1 is required for proper Arabic letter joining (cursive).
-  const caption = escapeDrawtext(scene.captionAr);
-  const drawtext =
-    `drawtext=fontfile=${ARABIC_FONT}` +
-    `:text='${caption}'` +
-    `:fontsize=64:fontcolor=white` +
-    `:borderw=4:bordercolor=black@0.85` +
-    `:box=1:boxcolor=black@0.55:boxborderw=24` +
-    `:x=(w-text_w)/2:y=h-text_h-160` +
-    `:text_shaping=1` +
-    `:enable='between(t,0.3,${SCENE_DURATION_SEC - 0.2})'`;
+  //
+  // Multi-line: ffmpeg drawtext doesn't auto-wrap, so callers can pass a "|"
+  // anywhere in captionAr to force a line break (rendered as stacked drawtext
+  // filters). Each line gets the same box treatment; lines are centered and
+  // stacked from the bottom up so the lowest line sits at the same baseline
+  // as a single-line caption would.
+  const FONT_SIZE = 56;            // shrunk from 64pt — fits scene-3 caption
+  const LINE_HEIGHT = FONT_SIZE + 24;
+  const lines = scene.captionAr.split("|").map((s) => s.trim()).filter(Boolean);
+  const drawtext = lines
+    .map((line, idx) => {
+      const lineFromBottom = lines.length - 1 - idx;
+      const yExpr = `h-text_h-160-${lineFromBottom * LINE_HEIGHT}`;
+      return (
+        `drawtext=fontfile=${ARABIC_FONT}` +
+        `:text='${escapeDrawtext(line)}'` +
+        `:fontsize=${FONT_SIZE}:fontcolor=white` +
+        `:borderw=4:bordercolor=black@0.85` +
+        `:box=1:boxcolor=black@0.55:boxborderw=18` +
+        `:x=(w-text_w)/2:y=${yExpr}` +
+        `:text_shaping=1` +
+        `:enable='between(t,0.3,${SCENE_DURATION_SEC - 0.2})'`
+      );
+    })
+    .join(",");
 
   const vf =
     `scale=${VIDEO_W * 2}:${VIDEO_H * 2}:force_original_aspect_ratio=increase,` +

@@ -56,7 +56,10 @@ function buildScript(niche: Niche): ScriptResult {
   return {
     captionShop: cfg.hookCaptionAr,
     captionBefore: "هذي صورة منتجك",
-    captionAfter: "خلال ٣٠ ثانية، صارت احترافية وجاهزة لمتجرك",
+    // "|" is a soft-break marker — renderVideo splits captions on it and
+    // stacks each line as a separate drawtext. Two lines here keeps the
+    // longest scene caption from running off-screen.
+    captionAfter: "خلال ٣٠ ثانية|صارت احترافية وجاهزة لمتجرك",
     captionCta: "جرّب تيجار فلو اليوم",
     voiceoverScript:
       `${cfg.hookCaptionAr}. ` +
