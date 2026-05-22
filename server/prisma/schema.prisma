@@ -297,6 +297,11 @@ model WhatsAppSession {
   lastSourceMimeType String?
   lastMessageAt      DateTime  @default(now())
   firstSeenAt        DateTime  @default(now())
+  // Register-CTA tracking (Issue #74). Guest-only; both fields stay null for
+  // verified merchants. Once set, the corresponding message never sends again
+  // for this phone number — strict once-per-user-ever semantics.
+  reengageCtaSentAt  DateTime?
+  exhaustionCtaSentAt DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 

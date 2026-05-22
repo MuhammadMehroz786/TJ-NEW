@@ -205,6 +205,15 @@ const dict: Dict = {
     en: "You have *{remaining}* free enhancement{plural} remaining.\n\nSend a product image to use one! 📸",
     ar: "متبقي لديك *{remaining}* تحسين{plural} مجاني.\n\nأرسل صورة منتج لاستخدام واحد! 📸",
   },
+
+  // ── Register-CTA messages (Issue #74) ──────────────────────────────────────
+  // Re-engagement nudge sent ~2hr after a guest used 3+ of 5 free enhancements
+  // and then went quiet. Goal: convert active free-trial users into registered
+  // merchants before they forget about us.
+  guest_reengage_cta: {
+    en: "Hey! 👋 You've been trying out TijarFlow AI — nice work.\n\nSign up at {signup} to unlock *30 AI credits every month*, save your enhanced photos to your library, and push them straight to your store. 🚀",
+    ar: "أهلاً! 👋 جربت تحسين الصور بتجار فلو — استمر بالتجربة.\n\nسجّل في {signup} لتحصل على *30 رصيد ذكاء اصطناعي شهرياً*، حفظ صورك في مكتبتك، ودفعها مباشرة إلى متجرك. 🚀",
+  },
   verified_idle_prompt: {
     en: "✅ Send your product image(s) — one or many. After I receive them I'll ask what theme to apply.\n\nType /help for commands.",
     ar: "✅ أرسل صور منتجاتك — واحدة أو أكثر. بعدها سأسألك عن الثيم المطلوب.\n\nاكتب /help لرؤية الأوامر.",

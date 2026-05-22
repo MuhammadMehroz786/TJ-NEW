@@ -25,6 +25,11 @@ import { addImageToBatch, type PendingImage } from "../services/whatsappBatch";
 import { t, plural, resolveLang, type Lang } from "../services/whatsappI18n";
 import { saveEnhancementToLibrary } from "../lib/imageStorage";
 import { logInboundMessage } from "../services/whatsappLog";
+import {
+  REENGAGE_CREDITS_THRESHOLD,
+  claimExhaustionCta,
+  scheduleReengageNudge,
+} from "../lib/whatsapp/registerCta";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -816,10 +821,16 @@ router.post("/webhook", async (req: Request, res: Response): Promise<void> => {
             where: { id: session.id },
             data: { state: STATES.EXHAUSTED },
           });
-          await sendWhatsAppTextMessage({
-            to: from,
-            body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
-          });
+          // Issue #74: send the register CTA at most once per phone number.
+          // claimExhaustionCta returns true only the first time it runs for
+          // an unregistered guest — subsequent attempts (more images while
+          // exhausted) silently no-op so we don't spam.
+          if (await claimExhaustionCta(prisma, session.id)) {
+            await sendWhatsAppTextMessage({
+              to: from,
+              body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
+            });
+          }
           continue;
         }
 
@@ -940,10 +951,13 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
         where: { id: session.id },
         data: { state: STATES.EXHAUSTED },
       });
-      await sendWhatsAppTextMessage({
-        to: from,
-        body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
-      });
+      // Issue #74: once-per-phone exhaustion CTA.
+      if (await claimExhaustionCta(prisma, session.id)) {
+        await sendWhatsAppTextMessage({
+          to: from,
+          body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
+        });
+      }
       return;
     }
   }
@@ -970,10 +984,22 @@ async function processBatch(session: SessionRow, imageIds: string[], theme: stri
           const usage = await consumeWeeklyAICredit(prisma, session.userId);
           usedPool = usage.usedPool;
         } else {
-          await prisma.whatsAppSession.update({
+          const updated = await prisma.whatsAppSession.update({
             where: { id: session.id },
             data: { creditsUsed: { increment: 1 } },
+            select: { id: true, creditsUsed: true, reengageCtaSentAt: true, userId: true },
           });
+          // Issue #74 Trigger 1: when an unregistered guest crosses the
+          // re-engagement threshold for the FIRST time, schedule the 2hr nudge.
+          // We schedule on each crossing past the threshold; maybeSendReengageNudge
+          // double-checks before sending, so duplicate scheduling is harmless.
+          if (
+            !updated.userId &&
+            !updated.reengageCtaSentAt &&
+            updated.creditsUsed >= REENGAGE_CREDITS_THRESHOLD
+          ) {
+            scheduleReengageNudge(prisma, session.id);
+          }
         }
 
         const media = await downloadWhatsAppMedia(imageId);
@@ -1155,16 +1181,28 @@ async function handleRefinement(
         where: { id: session.id },
         data: { state: STATES.EXHAUSTED },
       });
-      await sendWhatsAppTextMessage({
-        to: from,
-        body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
-      });
+      // Issue #74: once-per-phone exhaustion CTA.
+      if (await claimExhaustionCta(prisma, session.id)) {
+        await sendWhatsAppTextMessage({
+          to: from,
+          body: t(lang, "guest_exhausted_inline", { signup: SIGNUP_URL }),
+        });
+      }
       return;
     }
-    await prisma.whatsAppSession.update({
+    const updated = await prisma.whatsAppSession.update({
       where: { id: session.id },
       data: { creditsUsed: { increment: 1 } },
+      select: { id: true, creditsUsed: true, reengageCtaSentAt: true, userId: true },
     });
+    // Issue #74 Trigger 1: same nudge scheduling as the batch enhancement path.
+    if (
+      !updated.userId &&
+      !updated.reengageCtaSentAt &&
+      updated.creditsUsed >= REENGAGE_CREDITS_THRESHOLD
+    ) {
+      scheduleReengageNudge(prisma, session.id);
+    }
   }
 
   await sendWhatsAppTextMessage({ to: from, body: t(lang, "refine_applying") });
