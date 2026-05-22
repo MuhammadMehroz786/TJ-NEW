@@ -32,12 +32,12 @@ STYLE RULES (apply exactly):
 - Warm Saudi/MENA aesthetic, natural daylight from window on left
 - Documentary photography style, soft natural shadows
 - Color palette: warm earth tones, soft golds, deep browns, cream, not over-saturated
-- No people visible (no faces, no eyes, no shoulders, no hands)
+- Faceless: hands and forearms are welcome but NO faces, NO eyes, NO shoulders, NO bodies above the wrists
 - No Western signage, no alcohol, no neon
 - Authentic real-shop or real-home Saudi feel, not a stock photo
 `;
 
-const NEGATIVE = `face, eyes, mouth, talking, multiple people, full body, studio softbox lighting, ring light, harsh rim light, overproduced commercial advertisement aesthetic, Western mall storefront, alcohol bottles, neon signs, oversaturated colors, watermarks, text overlays`;
+const NEGATIVE = `face, eyes, mouth, talking, multiple people, full body, body above wrists, studio softbox lighting, ring light, harsh rim light, overproduced commercial advertisement aesthetic, Western mall storefront, alcohol bottles, neon signs, oversaturated colors, watermarks, text overlays`;
 
 export type SceneKind = "shop" | "before" | "after";
 
@@ -54,32 +54,39 @@ function shopPrompt(niche: NicheConfig): string {
   return `${niche.shopPrompt}\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`;
 }
 
-function beforePrompt(niche: NicheConfig, productOverride: string): string {
-  // A photo of the merchant's actual product, but shot the way a typical
-  // unpolished merchant phone snap looks: poor lighting, cluttered surface,
-  // mediocre composition. The same product object will be re-used in the
-  // "after" scene via image-to-image conditioning.
+function beforePrompt(_niche: NicheConfig, productOverride: string): string {
+  // The merchant POV: hands holding a smartphone in a Saudi majlis, taking a
+  // casual snapshot of their actual product sitting on a wooden table. The
+  // phone screen shows the product photo (poorly lit / amateur composition).
+  // The same hands, phone, and majlis setting are re-used in the "after"
+  // scene via image-to-image so the only thing that changes is what's on
+  // the phone screen.
   return (
-    `A poorly-lit casual phone snapshot of ${productOverride}. ` +
-    `Resting on a plain wooden surface with cluttered everyday background. ` +
-    `Harsh overhead fluorescent light, unflattering shadows, mediocre amateur ` +
-    `composition — the kind of photo a small merchant takes themselves before ` +
-    `they know how to shoot product photos.\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`
+    `A close-up overhead point-of-view photograph: a Saudi person's hands holding ` +
+    `a smartphone in a traditional Riyadh majlis home. The hands are framing a ` +
+    `casual quick snapshot of ${productOverride}, which is sitting on a dark walnut ` +
+    `wooden table beneath the phone. The phone screen clearly shows the photo ` +
+    `being taken — a poorly lit, unflattering, amateur snapshot of the product, ` +
+    `harsh shadows, mediocre composition. Around the table: a brass Arabic ` +
+    `coffee finjan, a small dish of Medjool dates, beige majlis cushions softly ` +
+    `blurred in the background. Soft warm afternoon daylight from a window on ` +
+    `the left. Hands and forearms visible only — NO face, NO body above wrists.\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`
   );
 }
 
 function afterPrompt(productOverride: string): string {
-  // Image-to-image: the reference image (the "before" output) carries the
-  // exact product identity. This prompt instructs Gemini to keep the SAME
-  // product but re-shoot it as a professional product photo.
+  // Image-to-image off the "before" output. Same hands, same phone, same
+  // majlis, same product — the only thing that changes is the photo shown
+  // on the phone screen: it becomes a professional studio-quality shot of
+  // the same product. This is the visual punchline of the whole video.
   return (
-    `Take the exact same product from the reference image and re-photograph it ` +
-    `as a beautifully composed professional studio product shot. ` +
-    `Same product: ${productOverride}. ` +
-    `Background: an elegant cream marble surface with soft directional lighting, ` +
-    `gentle reflections, magazine-quality product photography. ` +
-    `Do NOT change the product itself — same shape, color, label, proportions, ` +
-    `materials. Only the background, lighting, and composition change.\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`
+    `Take the exact same hands, same smartphone, same Saudi majlis setting, and ` +
+    `same product (${productOverride}) from the reference image. Keep the entire ` +
+    `composition, lighting, hand position, and physical product on the table ` +
+    `unchanged. ONLY change what's shown on the phone screen: the screen now ` +
+    `displays a beautifully composed professional product photograph of the same ` +
+    `${productOverride} — clean elegant background, magazine-quality lighting, ` +
+    `crisp focus. The phone screen content is the ONLY thing that transforms.\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`
   );
 }
 
