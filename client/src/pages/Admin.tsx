@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Users, DollarSign, Sparkles, MessageCircle, Search, ShieldCheck, Wallet, ArrowUpRight, Activity, TrendingUp, Server, Gauge, Ticket, Plus, Copy, Inbox, Mail } from "lucide-react";
+import { Users, DollarSign, Sparkles, MessageCircle, Search, ShieldCheck, Wallet, ArrowUpRight, Activity, TrendingUp, Server, Gauge, Ticket, Plus, Copy, Inbox, Mail, Video } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import api from "@/lib/api";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid, Legend } from "recharts";
 import { ContentAgentTab } from "@/components/admin/content-agent/ContentAgentTab";
+import { DailyVideosTab } from "@/components/admin/daily-videos/DailyVideosTab";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -196,7 +197,7 @@ function Tabs({ tabs, active, onChange }: { tabs: { id: string; label: string; i
 // Main component
 // ──────────────────────────────────────────────────────────────────────────────
 export function Admin() {
-  const [activeTab, setActiveTab] = useState<"overview" | "users" | "revenue" | "activity" | "whatsapp" | "leads" | "emails" | "codes" | "content-agent" | "system">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "users" | "revenue" | "activity" | "whatsapp" | "leads" | "emails" | "codes" | "content-agent" | "daily-videos" | "system">("overview");
 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [active, setActive] = useState<ActiveUsers | null>(null);
@@ -472,6 +473,7 @@ export function Admin() {
           { id: "emails", label: "Support Emails", icon: Mail },
           { id: "codes", label: "AI Codes", icon: Ticket },
           { id: "content-agent", label: "Content Agent", icon: Sparkles },
+          { id: "daily-videos", label: "Daily Videos", icon: Video },
           { id: "system", label: "System", icon: Server },
         ]}
       />
@@ -1090,6 +1092,10 @@ export function Admin() {
 
       {activeTab === "content-agent" && (
         <ContentAgentTab />
+      )}
+
+      {activeTab === "daily-videos" && (
+        <DailyVideosTab />
       )}
 
       {activeTab === "system" && sys && (
