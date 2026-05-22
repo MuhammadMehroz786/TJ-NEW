@@ -32,9 +32,11 @@ import whatsappRoutes from "./routes/whatsapp";
 import creditsRoutes from "./routes/credits";
 import sallaRoutes from "./routes/salla";
 import adminRoutes from "./routes/admin";
+import dailyDemoVideosRoutes from "./routes/dailyDemoVideos";
 import { createContentAgentRouter } from "./routes/contentAgent";
 import { GeminiContentClient } from "./lib/contentAgent/geminiClient";
 import { PrismaClient } from "@prisma/client";
+import { runDailyDemoVideo } from "./services/dailyDemoVideo";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -130,6 +132,7 @@ app.use("/api/credits/checkout", checkoutLimiter);
 app.use("/api/credits", creditsRoutes);
 app.use("/api/salla", sallaRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/admin/daily-videos", aiLimiter, dailyDemoVideosRoutes);
 
 // Content Agent — admin-only short-form content drafter. aiLimiter caps
 // Gemini calls per-IP just like /api/ai-studio. Singletons live here so the
@@ -173,4 +176,37 @@ app.listen(PORT, () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   const { startEmailBot } = require("./services/emailBot") as typeof import("./services/emailBot");
   startEmailBot();
+  startDailyDemoCron();
 });
+
+// Daily Demo Video cron — fires once per day at 09:00 KSA. The idempotency
+// check inside runDailyDemoVideo means re-firing on the same day is a no-op
+// (the (forDate, niche) row is already "done"). Cron is registered AFTER the
+// HTTP listener so a slow cron startup can't block port binding.
+//
+// Disable in tests / local dev by setting DAILY_DEMO_CRON=off.
+function startDailyDemoCron() {
+  if (process.env.DAILY_DEMO_CRON === "off") {
+    console.log("[dailyDemo] cron disabled via DAILY_DEMO_CRON=off");
+    return;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const cron = require("node-cron") as typeof import("node-cron");
+  cron.schedule(
+    "0 9 * * *",
+    async () => {
+      console.log("[dailyDemo] cron tick — starting daily generation");
+      const p = new PrismaClient();
+      try {
+        const result = await runDailyDemoVideo(p, { triggeredBy: "cron" });
+        console.log(`[dailyDemo] cron result: ${result.status} (${result.id})`);
+      } catch (err) {
+        console.error("[dailyDemo] cron crashed:", err);
+      } finally {
+        await p.$disconnect();
+      }
+    },
+    { timezone: "Asia/Riyadh" },
+  );
+  console.log("[dailyDemo] cron scheduled — daily at 09:00 Asia/Riyadh");
+}
