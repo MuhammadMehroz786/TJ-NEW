@@ -25,6 +25,8 @@ import path from "path";
  */
 
 const ARABIC_FONT = "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf";
+const LOGO_PATH = path.join(__dirname, "assets", "logo-dark.png");
+const LATIN_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
 const VIDEO_W = 1080;
 const VIDEO_H = 1920;
 const FPS = 25;
@@ -182,28 +184,38 @@ async function renderScene(scene: SceneInput, outPath: string): Promise<void> {
 // ── CTA end card ─────────────────────────────────────────────────────────────
 
 async function renderEndCard(captionAr: string, outPath: string, durationSec: number): Promise<void> {
-  // Solid TijarFlow brand color background. Centered Arabic CTA + brand URL.
-  // Color #1a1a1a (near-black) gives a calm, premium feel and matches the dark
-  // walnut table tone from the preceding scenes.
+  // Solid TijarFlow brand color background with the TijarFlow logo, an Arabic
+  // CTA, and the brand URL stacked vertically. Color #1a1a1a (near-black) gives
+  // a calm, premium feel and matches the dark walnut table tone from the
+  // preceding scenes; the white logo-dark.png wordmark reads cleanly on it.
+  //
+  // Layout (1080×1920): logo in the upper-middle, CTA centered, URL below.
   //
   // Duration is dynamic — passed in by the orchestrator after probing the
   // voiceover length so the CTA holds long enough to cover the last words.
   const caption = escapeDrawtext(captionAr);
   const brand = escapeDrawtext(TIJARFLOW_BRAND);
 
-  const vf =
-    `drawtext=fontfile=${ARABIC_FONT}` +
+  // Two inputs now (background + logo), so we drive everything through a single
+  // filter_complex: scale the logo to a fixed width (preserving aspect), overlay
+  // it centered horizontally at ~32% height, then draw the CTA + URL beneath.
+  const LOGO_W = 480; // px; logo source is 357×120, so height scales to ~161px
+  const filterComplex =
+    `[1:v]scale=${LOGO_W}:-1[logo];` +
+    `[0:v][logo]overlay=x=(W-w)/2:y=H*0.30[bg];` +
+    `[bg]drawtext=fontfile=${ARABIC_FONT}` +
     `:text='${caption}':fontsize=84:fontcolor=white` +
     `:text_shaping=1` +
-    `:x=(w-text_w)/2:y=(h-text_h)/2-100,` +
-    `drawtext=fontfile=${ARABIC_FONT}` +
-    `:text='${brand}':fontsize=52:fontcolor=#d4af37` + // gold accent
-    `:x=(w-text_w)/2:y=(h-text_h)/2+100`;
+    `:x=(w-text_w)/2:y=(h-text_h)/2+40[withcta];` +
+    `[withcta]drawtext=fontfile=${LATIN_FONT}` +
+    `:text='${brand}':fontsize=52:fontcolor=#d4af37` + // gold accent; Latin font so the URL isn't tofu
+    `:x=(w-text_w)/2:y=(h-text_h)/2+220`;
 
   await runFfmpeg([
     "-f", "lavfi",
     "-i", `color=c=0x1a1a1a:s=${VIDEO_W}x${VIDEO_H}:d=${durationSec.toFixed(2)}:r=${FPS}`,
-    "-vf", vf,
+    "-i", LOGO_PATH,
+    "-filter_complex", filterComplex,
     "-c:v", "libx264",
     "-pix_fmt", "yuv420p",
     "-preset", "fast",
