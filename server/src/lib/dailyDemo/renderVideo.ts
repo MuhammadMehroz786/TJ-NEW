@@ -328,12 +328,16 @@ export async function renderDemoVideo(params: RenderParams): Promise<RenderResul
   ];
   const endCardFile = path.join(outDir, "end-card.mp4");
 
-  await Promise.all([
-    renderScene(sceneSpecs[0], sceneFiles[0]),
-    renderScene(sceneSpecs[1], sceneFiles[1]),
-    renderScene(sceneSpecs[2], sceneFiles[2]),
-    renderEndCard(params.captions.cta, endCardFile, requiredEndCard),
-  ]);
+  // Render the 4 ffmpeg segments SEQUENTIALLY, not in parallel. The droplet has
+  // ~2GB RAM with no swap; four concurrent ffmpeg processes (each peaking around
+  // 340MB) plus the live API process OOM-kill the box mid-render (ffmpeg exits
+  // with a null code — i.e. killed by signal). Serial keeps peak RAM to a single
+  // ffmpeg at a time. On a 1-2 core droplet the wall-clock cost is small since
+  // the parallel version was already memory-bound, not CPU-bound.
+  await renderScene(sceneSpecs[0], sceneFiles[0]);
+  await renderScene(sceneSpecs[1], sceneFiles[1]);
+  await renderScene(sceneSpecs[2], sceneFiles[2]);
+  await renderEndCard(params.captions.cta, endCardFile, requiredEndCard);
 
   // 3. Stitch (3 scenes + 1 end card) with crossfades, with per-segment durations.
   const stitchedFile = path.join(outDir, "stitched.mp4");
