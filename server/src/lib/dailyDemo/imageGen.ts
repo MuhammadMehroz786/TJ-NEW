@@ -63,14 +63,18 @@ function beforePrompt(_niche: NicheConfig, productOverride: string): string {
   // the phone screen.
   return (
     `A close-up overhead point-of-view photograph: a Saudi person's hands holding ` +
-    `a smartphone in a traditional Riyadh majlis home. The hands are framing a ` +
-    `casual quick snapshot of ${productOverride}, which is sitting on a dark walnut ` +
-    `wooden table beneath the phone. The phone screen clearly shows the photo ` +
-    `being taken — a poorly lit, unflattering, amateur snapshot of the product, ` +
-    `harsh shadows, mediocre composition. Around the table: a brass Arabic ` +
-    `coffee finjan, a small dish of Medjool dates, beige majlis cushions softly ` +
-    `blurred in the background. Soft warm afternoon daylight from a window on ` +
-    `the left. Hands and forearms visible only — NO face, NO body above wrists.\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`
+    `a smartphone in a traditional Riyadh majlis home. The smartphone is LARGE and ` +
+    `dominant in the frame, held centered, filling roughly the middle 55% of the ` +
+    `vertical composition so its screen is big and perfectly legible. The hands are ` +
+    `framing a casual quick snapshot of ${productOverride}, which sits on a dark ` +
+    `walnut wooden table directly beneath the phone. The phone screen clearly and ` +
+    `sharply shows the photo being taken — a poorly lit, unflattering, AMATEUR ` +
+    `snapshot of ${productOverride}: dull flat lighting, harsh ugly shadows, cluttered ` +
+    `messy background, crooked mediocre composition, slightly blurry. The on-screen ` +
+    `amateur photo is the clear focal point. Around the table: a brass Arabic coffee ` +
+    `finjan, a small dish of Medjool dates, beige majlis cushions softly blurred in ` +
+    `the background. Soft warm afternoon daylight from a window on the left. Hands ` +
+    `and forearms visible only — NO face, NO body above wrists.\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`
   );
 }
 
@@ -80,13 +84,22 @@ function afterPrompt(productOverride: string): string {
   // on the phone screen: it becomes a professional studio-quality shot of
   // the same product. This is the visual punchline of the whole video.
   return (
-    `Take the exact same hands, same smartphone, same Saudi majlis setting, and ` +
-    `same product (${productOverride}) from the reference image. Keep the entire ` +
-    `composition, lighting, hand position, and physical product on the table ` +
-    `unchanged. ONLY change what's shown on the phone screen: the screen now ` +
-    `displays a beautifully composed professional product photograph of the same ` +
-    `${productOverride} — clean elegant background, magazine-quality lighting, ` +
-    `crisp focus. The phone screen content is the ONLY thing that transforms.\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`
+    `EDIT THE REFERENCE IMAGE. This is a precise before/after edit, NOT a new scene. ` +
+    `Reproduce the reference image EXACTLY — identical hands, identical smartphone, ` +
+    `identical phone position and size, identical Saudi majlis, identical wooden ` +
+    `table, identical brass finjan and dates, identical background, identical camera ` +
+    `angle and lighting. Do NOT restyle, re-light, or re-compose the room or the ` +
+    `physical scene in any way.\n\n` +
+    `THE ONE AND ONLY CHANGE — replace the photo displayed ON THE PHONE SCREEN. ` +
+    `The reference screen shows an amateur snapshot of ${productOverride}; in the ` +
+    `output the very same phone screen must instead display a STUNNING professional ` +
+    `studio product photograph of the same ${productOverride}: clean seamless ` +
+    `gradient studio backdrop, crisp tack-sharp focus, flattering soft-box ` +
+    `lighting with elegant highlights and gentle reflections, rich saturated ` +
+    `color, premium e-commerce hero-shot composition, the product centered and ` +
+    `hero-lit. The transformation on the screen must be OBVIOUS and dramatic — ` +
+    `clearly amateur-phone-photo turning into magazine-quality studio photo. ` +
+    `Everything outside the phone screen stays pixel-for-pixel the same.\n${STYLE_ANCHOR}\nNEGATIVE: ${NEGATIVE}`
   );
 }
 
