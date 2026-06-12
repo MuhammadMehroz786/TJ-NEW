@@ -32,6 +32,8 @@ interface ScriptResult {
   captionBefore: string;
   captionAfter: string;
   captionCta: string;
+  youtubeTitle: string;
+  youtubeDescription: string;
   // Estimated cost for the text generation step (currently fixed — Gemini text
   // is so cheap we don't bother metering tokens).
   costCents: number;
@@ -51,8 +53,12 @@ interface ScriptResult {
  * Phase 2 can swap this for a Gemini call that varies the wording if we want
  * more freshness across days for the same niche.
  */
-function buildScript(niche: Niche): ScriptResult {
+function buildScript(niche: Niche, productOverride: string = ""): ScriptResult {
   const cfg = NICHES[niche];
+  const prod = productOverride || cfg.product;
+  const title = `TijarFlow Demo: ${cfg.displayName} - ${prod}`;
+  const description = `Daily demo video generated automatically by TijarFlow (tijarflow.com) for the ${cfg.displayName} niche featuring ${prod}.\n\nVoiceover Script:\n${cfg.hookCaptionAr}. هذي صورة منتجك المعتادة. خلال ٣٠ ثانية فقط، باستخدام تيجار فلو، تحوّلت إلى صورة احترافية جاهزة لمتجرك والسوشيال ميديا. وفّرت ساعات من العمل. جرّب تيجار فلو اليوم على tijarflow.com.`;
+
   return {
     captionShop: cfg.hookCaptionAr,
     captionBefore: "هذي صورة منتجك",
@@ -66,6 +72,8 @@ function buildScript(niche: Niche): ScriptResult {
       `هذي صورة منتجك المعتادة. ` +
       `خلال ٣٠ ثانية فقط، باستخدام تيجار فلو، تحوّلت إلى صورة احترافية جاهزة لمتجرك والسوشيال ميديا. ` +
       `وفّرت ساعات من العمل. جرّب تيجار فلو اليوم على ${"tijarflow.com"}.`,
+    youtubeTitle: title.substring(0, 100),
+    youtubeDescription: description,
     costCents: 0,
   };
 }
@@ -121,7 +129,7 @@ export async function runDailyDemoVideo(
   try {
     // 1. Script (deterministic, instant)
     await prisma.dailyDemoVideo.update({ where: { id: row.id }, data: { status: "scripting" } });
-    const script = buildScript(niche);
+    const script = buildScript(niche, opts.productOverride);
     await prisma.dailyDemoVideo.update({
       where: { id: row.id },
       data: { script: script as unknown as object },

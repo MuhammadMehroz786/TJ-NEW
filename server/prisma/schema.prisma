@@ -546,6 +546,12 @@ model DailyDemoVideo {
   // 'cron' or 'manual:<userId>'
   triggeredBy   String  @default("cron")
 
+  // YouTube publishing status and integration fields
+  youtubeStatus       String    @default("pending") // pending | uploading | completed | failed | skipped
+  youtubeId           String?
+  youtubePublishedAt  DateTime?
+  youtubeErrorMessage String?   @db.Text
+
   @@unique([forDate, niche])
   @@index([createdAt])
   @@index([status])

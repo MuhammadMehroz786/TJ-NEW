@@ -175,6 +175,9 @@ app.listen(PORT, () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   const { startEmailBot } = require("./services/emailBot") as typeof import("./services/emailBot");
   startEmailBot();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const { startYoutubeScheduler } = require("./services/youtubeScheduler") as typeof import("./services/youtubeScheduler");
+  startYoutubeScheduler(new PrismaClient());
 });
 
 // Daily Demo Video runs on-request only — admin clicks "Generate" in the
